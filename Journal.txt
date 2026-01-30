@@ -139,3 +139,6 @@ Having trouble understand between sending BYTES and standard string. Need to lea
 
 Added BLETEST-Client.py for BLE communication via Python. Refactored PlatformIO config to use client.cpp and server.cpp for two MCU environments, replacing esp2.cpp and main.cpp. Renamed and relocated BLETEST-Server.PY. Updated Journal.txt with notes on byte/string handling. Added notes and terminal script documentation for development workflow. 
 -Added a client ESP32-S3, advertising for python backend to connect to for remote control then starts scanning for other MCU and connecting to the appriopiate using serviceUUID (thinking of implementing custom handshake protocol 
+
+Reorganized global variables and added functions for sending data to the server. Enhanced the callback to flag new data and trigger sending messages to a connected device. Minor prompt update in the Python client script.
+basically one MCU advertise and my pthon connected via BLE then that one MCU is connected to another MCU my pthon sends data over to that one MCU whichin returns that one MCU said data to the second MCU to turn of LED

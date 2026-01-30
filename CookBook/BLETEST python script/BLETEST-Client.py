@@ -34,7 +34,7 @@ async def connect_to_device():
             
             while client.is_connected:
                 # asks user for input 0 or 1
-                user_input = input("Enter 0 or 1")
+                user_input = input("Enter 0 or 1 ")
                 
                 # check to see if MCU is still on
                 try:

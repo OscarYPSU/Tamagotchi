@@ -16,15 +16,41 @@ static BLEUUID charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
 // Server setup for python script to connect to
 bool is_connected; // if its connected to python script to be interacted with 
 
+// scanning configs
+int scanTime = 5; // Scan duration in seconds
+BLEScan* pBLEScan;
+
+// configs for connecting to other MCU
+static BLEAdvertisedDevice* myDevice;
+static BLERemoteCharacteristic* pRemoteCharacteristic;
+static BLERemoteService* pRemoteService;
+bool found_device = false;
+bool connect_to_device = false;
+
+// configs for messaging to server
+bool new_data = false; 
+String new_data_string;
+
+// attempts to send message to server that MCU is connected to
+void send_data_to_server(String message){
+  pRemoteCharacteristic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+  Serial.println("Sent: " + message);
+}
+
+
 // 2. Callback Class: This is the "brain" that reacts to your phone
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       std::string value = pCharacteristic->getValue();
-
+      
       if (value.length() > 0) {
         char command = value[0];
         Serial.print("Received Value: ");
         Serial.println(command);
+        
+        // sets bool to true so code knows there is data avaiable to send
+        new_data = true;
+        new_data_string = String(value.c_str());
       }
     }
 };
@@ -44,16 +70,6 @@ class MyServerCallbacks: public BLEServerCallbacks {
     }
 };
 
-
-int scanTime = 5; // Scan duration in seconds
-BLEScan* pBLEScan;
-
-static BLEAdvertisedDevice* myDevice;
-static BLERemoteCharacteristic* pRemoteCharacteristic;
-static BLERemoteService* pRemoteService;
-bool found_device = false;
-bool connect_to_device = false;
-
 // This class handles what happens when a device is found
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
@@ -69,6 +85,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     }
 };
 
+//attempts to connect to the server given the myDevice
 void connect_to_server(){
   BLEClient* pClient  = BLEDevice::createClient();
   pClient->connect(myDevice); // Connect to the remote BLE Server
@@ -82,6 +99,7 @@ void connect_to_server(){
   }
 }
 
+BLECharacteristic *pCharacteristic;
 
 void setup() {
   Serial.begin(115200);
@@ -96,7 +114,7 @@ void setup() {
   BLEService *pService = pServer->createService("7a9e19c4-1234-4a5b-8c6d-9e0f1a2b3c4d");
 
   // Create the characteristic BEFORE starting the service
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+  pCharacteristic = pService->createCharacteristic(
     "1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e",
     BLECharacteristic::PROPERTY_READ |
     BLECharacteristic::PROPERTY_WRITE
@@ -130,7 +148,7 @@ void setup() {
 }
 
 void loop() {
-  if (is_connected){
+  if (is_connected && !connect_to_device){
     Serial.println("Scanning...");
     BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
     Serial.println("Scan done!");
@@ -144,4 +162,11 @@ void loop() {
     found_device = false; // so it doesnt repeat and keep trying to connect to it
     connect_to_device = true;
   }
+
+  if(new_data){
+    // sends message to other connected ESP-S3
+    send_data_to_server(String(pCharacteristic->getValue().c_str()));
+    new_data = false;
+  }
+
 }
