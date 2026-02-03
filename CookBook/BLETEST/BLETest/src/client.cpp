@@ -10,8 +10,8 @@
 
 // The server to connect to
 // The UUIDs of the service and characteristic you want to talk to
-static BLEUUID serviceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-static BLEUUID charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+static BLEUUID target_serviceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+static BLEUUID target_charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
 
 // Server setup for python script to connect to
 bool is_connected; // if its connected to python script to be interacted with 
@@ -21,9 +21,9 @@ int scanTime = 5; // Scan duration in seconds
 BLEScan* pBLEScan;
 
 // configs for connecting to other MCU
-static BLEAdvertisedDevice* myDevice;
-static BLERemoteCharacteristic* pRemoteCharacteristic;
-static BLERemoteService* pRemoteService;
+static BLEAdvertisedDevice* target_device;
+static BLERemoteCharacteristic* target_pcharacteristic;
+static BLERemoteService* target_premoteService;
 bool found_device = false;
 bool connect_to_device = false;
 
@@ -33,7 +33,7 @@ String new_data_string;
 
 // attempts to send message to server that MCU is connected to
 void send_data_to_server(String message){
-  pRemoteCharacteristic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+  target_pcharacteristic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
   Serial.println("Sent: " + message);
 }
 
@@ -73,27 +73,27 @@ class MyServerCallbacks: public BLEServerCallbacks {
 // This class handles what happens when a device is found
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
-      if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(serviceUUID)) {
+      if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(target_serviceUUID)) {
         BLEDevice::getScan()->stop();
-        myDevice = new BLEAdvertisedDevice(advertisedDevice);
-        Serial.println("Connecting to other ESP32-s3");
+        target_device = new BLEAdvertisedDevice(advertisedDevice);
+        Serial.printf("attempting to connect to device: %s", advertisedDevice.toString().c_str());
         found_device = true;
-    }
+      }
     
       // Print the basic info: Name, Address, and Signal Strength (RSSI)
-      Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
+      // Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
     }
 };
 
 //attempts to connect to the server given the myDevice
 void connect_to_server(){
   BLEClient* pClient  = BLEDevice::createClient();
-  pClient->connect(myDevice); // Connect to the remote BLE Server
-  pRemoteService = pClient->getService(serviceUUID);
-  pRemoteCharacteristic = pRemoteService->getCharacteristic(charUUID);
+  pClient->connect(target_device); // Connect to the remote BLE Server
+  target_premoteService = pClient->getService(target_serviceUUID);
+  target_pcharacteristic = target_premoteService->getCharacteristic(target_charUUID);
 
-  if(pRemoteCharacteristic->canRead()) {
-    std::string value = pRemoteCharacteristic->readValue();
+  if(target_pcharacteristic->canRead()) {
+    std::string value = target_pcharacteristic->readValue();
     Serial.print("The characteristic value was: ");
     Serial.println(value.c_str());
   }

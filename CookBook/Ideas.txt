@@ -1,0 +1,1 @@
+Need to implement automatic proximity connection, basically how one MCU know that the other MCU is in range and can be connected

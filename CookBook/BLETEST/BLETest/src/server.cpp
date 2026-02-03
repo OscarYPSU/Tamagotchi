@@ -7,7 +7,7 @@
 // just for getting mac address of the MCU
 #include <WiFi.h>
 
-#define LED_PIN 40 // Define our GPIO pin
+#define LED_PIN 4 // Define our GPIO pin
 
 // 2. Callback Class: This is the "brain" that reacts to your phone
 class MyCallbacks: public BLECharacteristicCallbacks {
