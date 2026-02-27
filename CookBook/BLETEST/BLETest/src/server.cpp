@@ -10,7 +10,7 @@
 #define LED_PIN 4 // Define our GPIO pin
 
 // 2. Callback Class: This is the "brain" that reacts to your phone
-class MyCallbacks: public BLECharacteristicCallbacks {
+class server_interaction_callbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
       std::string value = pCharacteristic->getValue();
 
@@ -31,7 +31,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     }
 };
 
-class MyServerCallbacks: public BLEServerCallbacks {
+class server_system_call_backs: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       Serial.println("Device connected! 📱");
     };
@@ -45,34 +45,34 @@ class MyServerCallbacks: public BLEServerCallbacks {
 };
 
 // Global pointers so we can reference them if needed
-BLECharacteristic *pCharacteristic;
+BLECharacteristic *server_p_characteristic;
 
 void setup() {
   Serial.begin(115200);
   BLEDevice::init("ESP32-S3-Server");
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+  BLEServer *p_server = BLEDevice::createServer();
+  BLEService *p_server_service = p_server->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 
   // Create the characteristic BEFORE starting the service
-  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+  server_p_characteristic = p_server_service->createCharacteristic(
     "beb5483e-36e1-4688-b7f5-ea07361b26a8",
     BLECharacteristic::PROPERTY_READ |
     BLECharacteristic::PROPERTY_WRITE
   );
 
   // Link our Callback class to the characteristic
-  pServer->setCallbacks(new MyServerCallbacks());
-  pCharacteristic->setCallbacks(new MyCallbacks());
+  p_server->setCallbacks(new server_system_call_backs());
+  server_p_characteristic->setCallbacks(new server_interaction_callbacks());
 
   // Set initial value
-  pCharacteristic->setValue("Send 1 or 0");
+  server_p_characteristic->setValue("Send 1 or 0");
   
-  pService->start(); // Now we "open the doors"
+  p_server_service->start(); // Now we "open the doors"
 
   // Start Advertising
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-  pAdvertising->setScanResponse(true);
+  BLEAdvertising *p_advertise = BLEDevice::getAdvertising();
+  p_advertise->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+  p_advertise->setScanResponse(true);
   BLEDevice::startAdvertising();
   Serial.println("Characteristic defined! Now advertising...");
 
