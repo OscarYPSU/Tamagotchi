@@ -142,3 +142,6 @@ Added BLETEST-Client.py for BLE communication via Python. Refactored PlatformIO 
 
 Reorganized global variables and added functions for sending data to the server. Enhanced the callback to flag new data and trigger sending messages to a connected device. Minor prompt update in the Python client script.
 basically one MCU advertise and my pthon connected via BLE then that one MCU is connected to another MCU my pthon sends data over to that one MCU whichin returns that one MCU said data to the second MCU to turn of LED
+
+Utilized manufacture data to add to advertising data packets so scanner device knows which device to look for
+Switch BLE discovery to match manufacturer data (checks company ID bytes 0xFF,0xFF) instead of relying solely on service UUID; store the matched BLEAdvertisedDevice pointer and stop scanning once found. Fix loop logic to scan only when not connected. On the server side, add DEVICE_ID, build and attach manufacturer data (company ID + device ID) to BLE advertisement, and add/expand callback scaffolding and comments. Also add an empty Server/gptAPI.py placeholder.
