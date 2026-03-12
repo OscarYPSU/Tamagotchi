@@ -8,13 +8,19 @@
 // for mac address
 #include <WiFi.h>
 
+#define SECRET 0x5A // secret for handshake protocl
+
 // The server to connect to
 // The UUIDs of the service and characteristic you want to talk to
 static BLEUUID target_serviceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 static BLEUUID target_charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+static BLEUUID target_authentication_UUID("aeb5483e-36e1-4688-b7f5-ea07361b26a8");
 
 // Server setup for python script to connect to
 bool is_connected; // if its connected to python script to be interacted with 
+
+// flag if handshake is needed
+bool need_handshake = false; 
 
 // scanning configs
 int scanTime = 5; // Scan duration in seconds
@@ -23,6 +29,7 @@ BLEScan* pBLEScan;
 // configs for connecting to other MCU
 static BLEAdvertisedDevice* target_device;
 static BLERemoteCharacteristic* target_pcharacteristic;
+static BLERemoteCharacteristic* target_auth_characteristic;
 static BLERemoteService* target_premoteService;
 bool found_device = false;
 bool connect_to_device = false;
@@ -37,6 +44,40 @@ void send_data_to_server(String message){
   Serial.println("Sent: " + message);
 }
 
+//attempts to connect to the server given the myDevice
+void connect_to_server(){
+  BLEClient* pClient  = BLEDevice::createClient();
+  pClient->connect(target_device); // Connect to the remote BLE Server
+  target_premoteService = pClient->getService(target_serviceUUID);
+  target_pcharacteristic = target_premoteService->getCharacteristic(target_charUUID);
+  target_auth_characteristic = target_premoteService->getCharacteristic(target_authentication_UUID);
+
+  if(target_pcharacteristic->canRead()) {
+    std::string value = target_pcharacteristic->readValue();
+    Serial.print("The characteristic value was: ");
+    Serial.println(value.c_str());
+  }
+}
+
+void perform_handshake(){
+  // Step 1: read nonce from server
+  std::string value = target_auth_characteristic->readValue();
+  if (value.length() < 1) return;
+
+  uint8_t nonce = (uint8_t)value[0]; // process info to correct data type = unsigned 8 int 
+  Serial.print("Nonce received: ");
+  Serial.println(nonce);
+
+  // Step 2: compute response
+  uint8_t response = nonce ^ SECRET;
+
+  // Step 3: write response back
+  target_auth_characteristic->writeValue(&response, 1, true);
+  Serial.print("Response sent: ");
+  Serial.println(response);
+
+  return;
+}
 
 // 2. Callback Class: This is the "brain" that reacts to your phone
 class MyCallbacks: public BLECharacteristicCallbacks {
@@ -59,6 +100,7 @@ class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       Serial.println("Device connected! 📱");
       is_connected = true; // enables scanning for device now
+      need_handshake = true;
     }
     
     // need to refactor this 
@@ -96,20 +138,6 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
       // Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
     }
 };
-
-//attempts to connect to the server given the myDevice
-void connect_to_server(){
-  BLEClient* pClient  = BLEDevice::createClient();
-  pClient->connect(target_device); // Connect to the remote BLE Server
-  target_premoteService = pClient->getService(target_serviceUUID);
-  target_pcharacteristic = target_premoteService->getCharacteristic(target_charUUID);
-
-  if(target_pcharacteristic->canRead()) {
-    std::string value = target_pcharacteristic->readValue();
-    Serial.print("The characteristic value was: ");
-    Serial.println(value.c_str());
-  }
-}
 
 BLECharacteristic *pCharacteristic;
 
@@ -174,7 +202,10 @@ void loop() {
     found_device = false; // so it doesnt repeat and keep trying to connect to it
     connect_to_device = true;
   }
-
+  if (need_handshake){
+    perform_handshake(); // performs handshake
+    need_handshake = false;
+  }
   if(new_data){
     // sends message to other connected ESP-S3
     send_data_to_server(String(pCharacteristic->getValue().c_str()));

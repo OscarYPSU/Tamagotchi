@@ -9,23 +9,34 @@
 #define LED_PIN 4 // Define our GPIO pin
 #define DEVICE_ID 1 // BLE scanning usage to recognize which is our device
 
+#define SECRET 0x5A // secret for handshake protocl
+
+bool allowed_connection = false; // only true after handshake taht allows connected device to start sending data
+uint8_t nonce; // random nonce for authentication
+
+
+// Global pointers so we can reference them if needed
+BLECharacteristic *server_p_characteristic; // for turning and closing LED by taking in 1 and 0 input from connected device
+BLECharacteristic *authCharacteristic; // for autheniticaton process
+
 // determines what happens data is received from connected devices
 class server_interaction_callbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string value = pCharacteristic->getValue();
+      if (allowed_connection){
+        std::string value = pCharacteristic->getValue();
 
-      if (value.length() > 0) {
-        char command = value[0];
-        Serial.print("Received Value: ");
-        Serial.println(command);
-
-        // Logic to toggle the LED based on the message
-        if (command == '1') {
-          digitalWrite(LED_PIN, HIGH);
-          Serial.println("Action: LED ON 💡");
-        } else if (command == '0') {
-          digitalWrite(LED_PIN, LOW);
-          Serial.println("Action: LED OFF 🌑");
+        if (value.length() > 0 ) {
+          char command = value[0];
+          Serial.print("Received Value: ");
+          Serial.println(command);
+          // Logic to toggle the LED based on the message
+          if (command == '1') {
+            digitalWrite(LED_PIN, HIGH);
+            Serial.println("Action: LED ON 💡");
+          } else if (command == '0') {
+            digitalWrite(LED_PIN, LOW);
+            Serial.println("Action: LED OFF 🌑");
+          }
         }
       }
     }
@@ -35,25 +46,41 @@ class server_interaction_callbacks: public BLECharacteristicCallbacks {
 class server_system_call_backs: public BLEServerCallbacks {
     // on connect, will display that a device has been connected
     void onConnect(BLEServer* pServer) {
-      Serial.println("Device connected! 📱");
+      Serial.println("Device attempting to connect, sending authentication challenge!");      
+
+      // Generate a new random nonce
+      nonce = random(1, 255);
+      // Write it to the auth characteristic
+      authCharacteristic->setValue(&nonce, 1); // setting the value of the auth char so client can grab it and sent the answer
+      Serial.print("Nonce sent to client: ");
+      Serial.println(nonce);
     };
     // when disconnected, it will open up adveritising again to allow other device to connect !!! need to work on multi connection and see if thats possible
     void onDisconnect(BLEServer* pServer) {
       Serial.println("Device disconnected... 🔌");
+      
+      allowed_connection = false;  // reset auth
       // This is the key: tell the ESP32 to start advertising again
       BLEDevice::startAdvertising();
       Serial.println("Restarted advertising!");
     }
 };
 
-// UNFINISHED 
 // server authentication callback to verify that the connected device is of own devices
-class server_authentication_callbacks: public BLEServerCallbacks{
-  
+class server_authentication_callbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() < 1) return; // not valid
+        uint8_t response = (uint8_t)value[0]; // process value into response data form (unsigned int 8)
+        if (response == (nonce ^ SECRET)) {  // ✅ verify XOR  authentication
+          allowed_connection = true;
+          Serial.println("Handshake success ✅");
+        } else {
+          allowed_connection = false;
+          Serial.println("Handshake failed ❌");
+        }
+    }
 };
-
-// Global pointers so we can reference them if needed
-BLECharacteristic *server_p_characteristic;
 
 void setup() {
   Serial.begin(115200);
@@ -68,9 +95,15 @@ void setup() {
     BLECharacteristic::PROPERTY_WRITE
   );
 
+  authCharacteristic = p_server_service->createCharacteristic(
+  "aeb5483e-36e1-4688-b7f5-ea07361b26a8", // auth UUID
+  BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+  );
+
   // Link our Callback class to the characteristic
   p_server->setCallbacks(new server_system_call_backs());
   server_p_characteristic->setCallbacks(new server_interaction_callbacks());
+  authCharacteristic->setCallbacks(new server_authentication_callbacks()); // attach the authenication behavioral code to the characterstics
 
   // Set initial value
   server_p_characteristic->setValue("Send 1 or 0");
