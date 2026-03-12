@@ -72,14 +72,26 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 // This class handles what happens when a device is found
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
-    void onResult(BLEAdvertisedDevice advertisedDevice) {
-      if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(target_serviceUUID)) {
-        BLEDevice::getScan()->stop();
-        target_device = new BLEAdvertisedDevice(advertisedDevice);
-        Serial.printf("attempting to connect to device: %s", advertisedDevice.toString().c_str());
-        found_device = true;
+    void onResult(BLEAdvertisedDevice advertisedDevice) {      
+      if (advertisedDevice.haveManufacturerData()){ 
+        std::string scanned_device_manufacture_data = advertisedDevice.getManufacturerData();
+
+         // Make sure it has at least 3 bytes
+        if (scanned_device_manufacture_data.length() >= 3) {
+            uint8_t companyID0 = (uint8_t)scanned_device_manufacture_data[0];
+            uint8_t companyID1 = (uint8_t)scanned_device_manufacture_data[1];
+
+            // Check for correct manufacture data and stop scanning and connect to it
+            if (companyID0 == 0xFF && companyID1 == 0xFF) {
+                BLEDevice::getScan()->stop();
+                target_device = new BLEAdvertisedDevice(advertisedDevice);
+                Serial.printf("attempting to connect to device: %s", advertisedDevice.toString().c_str());
+                found_device = true;
+            }
+        }
+
       }
-    
+
       // Print the basic info: Name, Address, and Signal Strength (RSSI)
       // Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
     }
@@ -148,7 +160,7 @@ void setup() {
 }
 
 void loop() {
-  if (is_connected && !connect_to_device){
+  if (!is_connected && !connect_to_device){
     Serial.println("Scanning...");
     BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
     Serial.println("Scan done!");
