@@ -1,1 +1,3 @@
-use MAC address in scanning to determine which device to connect to as using service UUId and device name can have conflict with other devices that accidentally also have similar
+work on integration of chatgpt
+
+Integration of face tracking and emotion detector with chatgpt
