@@ -1,3 +1,4 @@
 *.pyc
 /iotBot/Lib
 /iotBot
+AWS_related/python/
