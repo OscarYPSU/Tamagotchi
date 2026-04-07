@@ -84,6 +84,12 @@ class server_authentication_callbacks: public BLECharacteristicCallbacks {
 
 void setup() {
   Serial.begin(115200);
+
+  // prints out the mac address of the device for scanning purposes
+  Serial.print("Device MAC Address: ");
+  Serial.println(WiFi.macAddress());
+
+  
   BLEDevice::init("ESP32-S3-Server");
   BLEServer *p_server = BLEDevice::createServer();
   BLEService *p_server_service = p_server->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");

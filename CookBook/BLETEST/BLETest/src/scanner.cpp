@@ -148,7 +148,7 @@ void setup() {
   Serial.print("ESP32-S3 MAC Address: ");
   Serial.println(WiFi.macAddress());
 
-  // First we connect to the MCU then we open the MCU up to scan other devices
+  // First we connect to the MCU via python script then we open the MCU up to scan other devices
   BLEDevice::init("ESP32-S3-Client");
   BLEServer *pServer = BLEDevice::createServer();
   BLEService *pService = pServer->createService("7a9e19c4-1234-4a5b-8c6d-9e0f1a2b3c4d");

@@ -3,9 +3,10 @@
 #include <PubSubClient.h> // MQTT protocol
 #include <Arduino.h>
 
+
 // wifi configs
-const char* WIFI_SSID = "Verizon_yang";
-const char* WIFI_PASSWORD = "9172913763"; 
+const char* WIFI_SSID = "psu-personal";
+// const char* WIFI_PASSWORD = "9172913763";  dont need since im using school wifi that doesnt require password
 
 // AWS IOT configs
 const char* AWS_ENDPOINT = "abuwn28a3fsb9-ats.iot.us-east-2.amazonaws.com";
@@ -82,6 +83,8 @@ const char* PRIVATE_KEY = \
 "h9yeu2XhM1FpSN/yWLwUkpYfa08nyIP2qFtJ2eqxrfA6Uz594qs0ZGfR8EJJXIC+\n" \
 "zlqzSSRQcx/h2KvcR/vrLAyR8bTG8GIZ8q/YJ61142rQh9ZSEH8owA==\n" \
 "-----END RSA PRIVATE KEY-----\n";
+
+
 // endpoint for publishing data
 const char* MQTT_TOPIC_PUB = "device/data";
 
@@ -91,7 +94,7 @@ PubSubClient client(net); // tells the MQTT protocol to use this TCP/IP with TLS
 // connecting to wifi
 void connectWiFi() {
   Serial.print("Connecting to WiFi");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(WIFI_SSID);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -122,11 +125,87 @@ void connectAWS() {
   }
 }
 
+void send_message_to_aws(const String& message) {
+  if (client.connected()) {
+    String msg = "{\"message\":\"" + message + "\"}";
+    client.publish(MQTT_TOPIC_PUB, msg.c_str());
+    Serial.println("Published: " + msg);
+  } else {
+    Serial.println("MQTT not connected, cannot publish");
+  }
+}
+
+
+// advertise its signal to allow python script connection to manually receive datas
+#include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
+#include <BLEServer.h>
+#include <BLEDevice.h>
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      Serial.println("Device connected! 📱");
+    }
+    
+    // need to refactor this 
+    void onDisconnect(BLEServer* pServer) {
+      Serial.println("Device disconnected... 🔌");
+      // This is the key: tell the ESP32 to start advertising again
+      BLEDevice::startAdvertising();
+      Serial.println("Restarted advertising!");
+    }
+};
+// 2. Callback Class: This is the "brain" that reacts to your phone
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string value = pCharacteristic->getValue();
+      
+      if (value.length() > 0) {
+        std::string command = value;
+        Serial.print("Received Value: ");
+        Serial.println(command.c_str());
+        
+        // sends message to AWS IOT CORE
+        send_message_to_aws(String(command.c_str()));
+      }
+    }
+};
+
 
 void setup() {
   Serial.begin(115200);
   connectWiFi();
   connectAWS();
+
+  // First we connect to the MCU via python script
+  BLEDevice::init("ESP32-S3-Client");
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService("7a9e19c4-1234-4a5b-8c6d-9e0f1a2b3c4d");
+
+  // Create the characteristic BEFORE starting the service
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+    "1b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e",
+    BLECharacteristic::PROPERTY_READ |
+    BLECharacteristic::PROPERTY_WRITE
+  );
+
+  // Link our Callback class to the characteristic
+  pServer->setCallbacks(new MyServerCallbacks());
+  pCharacteristic->setCallbacks(new MyCallbacks());
+
+  // Set initial value
+  pCharacteristic->setValue("Send some messages");
+  
+  pService->start(); // Now we "open the doors"
+
+  // Start Advertising
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID("7a9e19c4-1234-4a5b-8c6d-9e0f1a2b3c4d");
+  pAdvertising->setScanResponse(true);
+  BLEDevice::startAdvertising();
+  Serial.println("Characteristic defined! Ready to advertise...");
+
 }
 
 void loop() {
@@ -137,11 +216,11 @@ void loop() {
   client.loop();
 
   // publish every 5 seconds
-  static unsigned long lastPublish = 0;
-  if (millis() - lastPublish > 5000) {
-    lastPublish = millis();
-    String msg = "{\"message\":\"Hello from ESP-S3\"}";
-    client.publish(MQTT_TOPIC_PUB, msg.c_str());
-    Serial.println("Published: " + msg);
-  }
+  //static unsigned long lastPublish = 0;
+  //if (millis() - lastPublish > 5000) {
+  //  lastPublish = millis();
+  //  String msg = "{\"message\":\"Hello from ESP-S3\"}";
+  //  client.publish(MQTT_TOPIC_PUB, msg.c_str());
+  //  Serial.println("Published: " + msg);
+  //}
 }
