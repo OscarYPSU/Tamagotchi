@@ -1,0 +1,7 @@
+Used AWS Lambda for low cost and no need for configurationo of a server unlike AWS ec2 which is more costly and need to manage a server
+
+Used MQTT communication for its fast communication method between AWS and MCU rather than straight from MCU making HTTP request to a EC2 server that servers APIS
+
+Used all at once buffer for openai response despite low response rate since openai wont really interact with user rather just using function calling and calling specific functions within the system
+
+used a simple xor challenge handshake model for authenitcaitaon for BLE functioanlity to authenticate the device im connecting it. its simple and secure. only downside is that it requires a extra layer when connecting so can take a litle longer to get that intial connection. Could have also used MAC address or common name in advertising packet but MAC address you need to hardcore new device into the system and common name can have a conflict with other devicesS

@@ -1,5 +1,6 @@
 #include <WiFi.h> // wifi functionality
 #include <WiFiClientSecure.h> // TLS encryption
+#define MQTT_MAX_PACKET_SIZE 2048 // Adjust based on expected AI response length
 #include <PubSubClient.h> // MQTT protocol
 #include <Arduino.h>
 
@@ -87,9 +88,10 @@ const char* PRIVATE_KEY = \
 
 // endpoint for publishing data
 const char* MQTT_TOPIC_PUB = "device/data";
+const char* MQTT_TOPIC_SUB = "openAI/response"; // receiving the openai response from aws 
 
 WiFiClientSecure net; // TCP encrypted by TLS
-PubSubClient client(net); // tells the MQTT protocol to use this TCP/IP with TLS
+PubSubClient MQTT_client(net); // tells the MQTT protocol to use this TCP/IP with TLS
 
 // connecting to wifi
 void connectWiFi() {
@@ -104,37 +106,59 @@ void connectWiFi() {
   Serial.println(WiFi.localIP());
 }
 
-// connecting to AWS IOT CORE via MQTT
-void connectAWS() {
-  net.setCACert(AWS_ROOT_CA);
-  net.setCertificate(DEVICE_CERT);
-  net.setPrivateKey(PRIVATE_KEY);
-
-  client.setServer(AWS_ENDPOINT, 8883);
-
-  Serial.println("Connecting to AWS IoT...");
-  while (!client.connected()) {
-    if (client.connect("ESP_S3_Device")) {
-      Serial.println("Connected to AWS IoT!");
-    } else {
-      Serial.print("Failed, rc=");
-      Serial.print(client.state());
-      Serial.println(" retrying in 2s");
-      delay(2000);
-    }
-  }
-}
-
 void send_message_to_aws(const String& message) {
-  if (client.connected()) {
+  if (MQTT_client.connected()) {
     String msg = "{\"message\":\"" + message + "\"}";
-    client.publish(MQTT_TOPIC_PUB, msg.c_str());
+    MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
     Serial.println("Published: " + msg);
   } else {
     Serial.println("MQTT not connected, cannot publish");
   }
 }
 
+void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) {
+  Serial.print("Response received on topic: ");
+  Serial.println(topic);
+
+  // Convert the byte payload into a readable String
+  String message = "";
+  for (int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+
+  // Print the ChatGPT response to your Serial Monitor
+  Serial.println("--- OpenAI Response ---");
+  Serial.println(message);
+  Serial.println("-----------------------");
+}
+
+// connecting to AWS IOT CORE via MQTT
+void connectAWS() {
+  net.setCACert(AWS_ROOT_CA);
+  net.setCertificate(DEVICE_CERT);
+  net.setPrivateKey(PRIVATE_KEY);
+
+  MQTT_client.setServer(AWS_ENDPOINT, 8883); // AWS IoT Core MQTT port
+  MQTT_client.setCallback(receive_response_from_AWS); // set the callback function to handle incoming messages
+
+  Serial.println("Connecting to AWS IoT...");
+  while (!MQTT_client.connected()) {
+    if (MQTT_client.connect("ESP_S3_Device")) {
+      // SUBSCRIBE HERE
+      // The topic must match what your Lambda is publishing to
+      MQTT_client.subscribe("openAI/response"); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
+      
+      // Logs 
+      Serial.println("Subscribed to OpenAI response topic.");
+      Serial.println("Connected to AWS IoT!");
+    } else {
+      Serial.print("Failed, rc=");
+      Serial.print(MQTT_client.state());
+      Serial.println(" retrying in 2s");
+      delay(2000);
+    }
+  }
+}
 
 // advertise its signal to allow python script connection to manually receive datas
 #include <BLEUtils.h>
@@ -171,7 +195,6 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       }
     }
 };
-
 
 void setup() {
   Serial.begin(115200);
@@ -210,17 +233,8 @@ void setup() {
 
 void loop() {
   // ensure connection stays alive
-  if (!client.connected()) {
+  if (!MQTT_client.connected()) {
     connectAWS();
   }
-  client.loop();
-
-  // publish every 5 seconds
-  //static unsigned long lastPublish = 0;
-  //if (millis() - lastPublish > 5000) {
-  //  lastPublish = millis();
-  //  String msg = "{\"message\":\"Hello from ESP-S3\"}";
-  //  client.publish(MQTT_TOPIC_PUB, msg.c_str());
-  //  Serial.println("Published: " + msg);
-  //}
+  MQTT_client.loop();
 }

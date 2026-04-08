@@ -1,3 +1,0 @@
-work on integration of chatgpt
-
-Integration of face tracking and emotion detector with chatgpt

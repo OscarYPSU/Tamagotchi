@@ -1,0 +1,3 @@
+integrate a databse w the system to hold openai interaction
+
+set up interaction of two devices that talks ot each other like AI agents  to build complex under the hood relationships
