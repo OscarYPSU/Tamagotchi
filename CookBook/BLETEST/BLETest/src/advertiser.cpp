@@ -6,82 +6,6 @@
 // just for getting mac address of the MCU
 #include <WiFi.h>
 
-#define LED_PIN 4 // Define our GPIO pin
-#define DEVICE_ID 1 // BLE scanning usage to recognize which is our device
-
-#define SECRET 0x5A // secret for handshake protocl
-
-bool allowed_connection = false; // only true after handshake taht allows connected device to start sending data
-uint8_t nonce; // random nonce for authentication
-
-
-// Global pointers so we can reference them if needed
-BLECharacteristic *server_p_characteristic; // for turning and closing LED by taking in 1 and 0 input from connected device
-BLECharacteristic *authCharacteristic; // for autheniticaton process
-
-// determines what happens data is received from connected devices
-class server_interaction_callbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      if (allowed_connection){
-        std::string value = pCharacteristic->getValue();
-
-        if (value.length() > 0 ) {
-          char command = value[0];
-          Serial.print("Received Value: ");
-          Serial.println(command);
-          // Logic to toggle the LED based on the message
-          if (command == '1') {
-            digitalWrite(LED_PIN, HIGH);
-            Serial.println("Action: LED ON 💡");
-          } else if (command == '0') {
-            digitalWrite(LED_PIN, LOW);
-            Serial.println("Action: LED OFF 🌑");
-          }
-        }
-      }
-    }
-};
-
-// startup callbacks for what happens the first time the other device connects to current device
-class server_system_call_backs: public BLEServerCallbacks {
-    // on connect, will display that a device has been connected
-    void onConnect(BLEServer* pServer) {
-      Serial.println("Device attempting to connect, sending authentication challenge!");      
-
-      // Generate a new random nonce
-      nonce = random(1, 255);
-      // Write it to the auth characteristic
-      authCharacteristic->setValue(&nonce, 1); // setting the value of the auth char so client can grab it and sent the answer
-      Serial.print("Nonce sent to client: ");
-      Serial.println(nonce);
-    };
-    // when disconnected, it will open up adveritising again to allow other device to connect !!! need to work on multi connection and see if thats possible
-    void onDisconnect(BLEServer* pServer) {
-      Serial.println("Device disconnected... 🔌");
-      
-      allowed_connection = false;  // reset auth
-      // This is the key: tell the ESP32 to start advertising again
-      BLEDevice::startAdvertising();
-      Serial.println("Restarted advertising!");
-    }
-};
-
-// server authentication callback to verify that the connected device is of own devices
-class server_authentication_callbacks: public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *pCharacteristic) {
-        std::string value = pCharacteristic->getValue();
-        if (value.length() < 1) return; // not valid
-        uint8_t response = (uint8_t)value[0]; // process value into response data form (unsigned int 8)
-        if (response == (nonce ^ SECRET)) {  // ✅ verify XOR  authentication
-          allowed_connection = true;
-          Serial.println("Handshake success ✅");
-        } else {
-          allowed_connection = false;
-          Serial.println("Handshake failed ❌");
-        }
-    }
-};
-
 /*  
 AWS IOT CORE SET UP
 */
@@ -192,9 +116,9 @@ void connectWiFi() {
 
 void send_message_to_aws(const String& message) {
   if (MQTT_client.connected()) {
-    String msg = "{\"message\":\"" + message + "\"}";
+    String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
     MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
-    Serial.println("Published: " + msg);
+    Serial.println("Published to MQTT IOT CORE: " + msg);
   } else {
     Serial.println("MQTT not connected, cannot publish");
   }
@@ -227,7 +151,7 @@ void connectAWS() {
 
   Serial.println("Connecting to AWS IoT...");
   while (!MQTT_client.connected()) {
-    if (MQTT_client.connect("ESP_S3_Device")) {
+    if (MQTT_client.connect("ESP_S3_Device1")) {
       // SUBSCRIBE HERE
       // The topic must match what your Lambda is publishing to
       MQTT_client.subscribe(MQTT_TOPIC_SUB); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
@@ -244,6 +168,79 @@ void connectAWS() {
   }
 }
 
+// ----------------
+// BLE SET UP
+// ----------------
+#define LED_PIN 4 // Define our GPIO pin
+#define DEVICE_ID 1 // BLE scanning usage to recognize which is our device
+
+#define SECRET 0x5A // secret for handshake protocl
+
+bool allowed_connection = false; // only true after handshake taht allows connected device to start sending data
+uint8_t nonce; // random nonce for authentication
+
+
+// Global pointers so we can reference them if needed
+BLECharacteristic *server_p_characteristic; // for turning and closing LED by taking in 1 and 0 input from connected device
+BLECharacteristic *authCharacteristic; // for autheniticaton process
+
+// determines what happens data is received from connected devices
+class server_interaction_callbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      if (allowed_connection){
+        std::string value = pCharacteristic->getValue();
+        Serial.print("Received value: ");
+        Serial.println(value.c_str());
+
+        // sends message to AWS IOT CORE to then be processed by Lambda and ChatGPT
+        send_message_to_aws(String(value.c_str())); 
+      }
+    }
+};
+
+// startup callbacks for what happens the first time the other device connects to current device
+class server_system_call_backs: public BLEServerCallbacks {
+    // on connect, will display that a device has been connected
+    void onConnect(BLEServer* pServer) {
+      Serial.println("Device attempting to connect, sending authentication challenge!");      
+
+      // Generate a new random nonce
+      nonce = random(1, 255);
+      // Write it to the auth characteristic
+      authCharacteristic->setValue(&nonce, 1); // setting the value of the auth char so client can grab it and sent the answer
+      Serial.print("Nonce sent to client: ");
+      Serial.println(nonce);
+
+      Serial.println("closing advertising so no other devices can connect...");
+      BLEDevice::getAdvertising()->stop(); // stop advertising so other devices cant connect while one is already connected
+
+    };
+    // when disconnected, it will open up adveritising again to allow other device to connect !!! need to work on multi connection and see if thats possible
+    void onDisconnect(BLEServer* pServer) {
+      Serial.println("Device disconnected... 🔌");
+      
+      allowed_connection = false;  // reset auth
+      // This is the key: tell the ESP32 to start advertising again
+      BLEDevice::startAdvertising();
+      Serial.println("Restarted advertising!");
+    }
+};
+
+// server authentication callback to verify that the connected device is of own devices
+class server_authentication_callbacks: public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *pCharacteristic) {
+        std::string value = pCharacteristic->getValue();
+        if (value.length() < 1) return; // not valid
+        uint8_t response = (uint8_t)value[0]; // process value into response data form (unsigned int 8)
+        if (response == (nonce ^ SECRET)) {  // ✅ verify XOR  authentication
+          allowed_connection = true;
+          Serial.println("Handshake success ✅");
+        } else {
+          allowed_connection = false;
+          Serial.println("Handshake failed ❌");
+        }
+    }
+};
 
 void setup() {
   Serial.begin(115200);
@@ -277,7 +274,7 @@ void setup() {
   authCharacteristic->setCallbacks(new server_authentication_callbacks()); // attach the authenication behavioral code to the characterstics
 
   // Set initial value
-  server_p_characteristic->setValue("Send 1 or 0");
+  server_p_characteristic->setValue("");
   
   p_server_service->start(); // Now we "open the doors"
 

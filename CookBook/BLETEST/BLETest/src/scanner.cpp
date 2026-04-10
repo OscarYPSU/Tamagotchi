@@ -7,144 +7,9 @@
 
 // for mac address
 #include <WiFi.h>
-
-#define SECRET 0x5A // secret for handshake protocl
-
-// The server to connect to
-// The UUIDs of the service and characteristic you want to talk to
-static BLEUUID target_serviceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-static BLEUUID target_charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
-static BLEUUID target_authentication_UUID("aeb5483e-36e1-4688-b7f5-ea07361b26a8");
-
-// Server setup for python script to connect to
-bool is_connected; // if its connected to python script to be interacted with 
-
-// flag if handshake is needed
-bool need_handshake = false; 
-
-// scanning configs
-int scanTime = 5; // Scan duration in seconds
-BLEScan* pBLEScan;
-
-// configs for connecting to other MCU
-static BLEAdvertisedDevice* target_device;
-static BLERemoteCharacteristic* target_pcharacteristic;
-static BLERemoteCharacteristic* target_auth_characteristic;
-static BLERemoteService* target_premoteService;
-bool found_device = false;
-bool connect_to_device = false;
-
-// configs for messaging to server
-bool new_data = false; 
-String new_data_string;
-
-// attempts to send message to server that MCU is connected to
-void send_data_to_server(String message){
-  target_pcharacteristic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
-  Serial.println("Sent: " + message);
-}
-
-//attempts to connect to the server given the myDevice
-void connect_to_server(){
-  BLEClient* pClient  = BLEDevice::createClient();
-  pClient->connect(target_device); // Connect to the remote BLE Server
-  target_premoteService = pClient->getService(target_serviceUUID);
-  target_pcharacteristic = target_premoteService->getCharacteristic(target_charUUID);
-  target_auth_characteristic = target_premoteService->getCharacteristic(target_authentication_UUID);
-
-  if(target_pcharacteristic->canRead()) {
-    std::string value = target_pcharacteristic->readValue();
-    Serial.print("The characteristic value was: ");
-    Serial.println(value.c_str());
-  }
-}
-
-void perform_handshake(){
-  // Step 1: read nonce from server
-  std::string value = target_auth_characteristic->readValue();
-  if (value.length() < 1) return;
-
-  uint8_t nonce = (uint8_t)value[0]; // process info to correct data type = unsigned 8 int 
-  Serial.print("Nonce received: ");
-  Serial.println(nonce);
-
-  // Step 2: compute response
-  uint8_t response = nonce ^ SECRET;
-
-  // Step 3: write response back
-  target_auth_characteristic->writeValue(&response, 1, true);
-  Serial.print("Response sent: ");
-  Serial.println(response);
-
-  return;
-}
-
-// 2. Callback Class: This is the "brain" that reacts to your phone
-class MyCallbacks: public BLECharacteristicCallbacks {
-    void onWrite(BLECharacteristic *pCharacteristic) {
-      std::string value = pCharacteristic->getValue();
-      
-      if (value.length() > 0) {
-        char command = value[0];
-        Serial.print("Received Value: ");
-        Serial.println(command);
-        
-        // sets bool to true so code knows there is data avaiable to send
-        new_data = true;
-        new_data_string = String(value.c_str());
-      }
-    }
-};
-
-class MyServerCallbacks: public BLEServerCallbacks {
-    void onConnect(BLEServer* pServer) {
-      Serial.println("Device connected! 📱");
-      is_connected = true; // enables scanning for device now
-      need_handshake = true;
-    }
-    
-    // need to refactor this 
-    void onDisconnect(BLEServer* pServer) {
-      Serial.println("Device disconnected... 🔌");
-      // This is the key: tell the ESP32 to start advertising again
-      BLEDevice::startAdvertising();
-      Serial.println("Restarted advertising!");
-    }
-};
-
-// This class handles what happens when a device is found
-class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
-    void onResult(BLEAdvertisedDevice advertisedDevice) {      
-      if (advertisedDevice.haveManufacturerData()){ 
-        std::string scanned_device_manufacture_data = advertisedDevice.getManufacturerData();
-
-         // Make sure it has at least 3 bytes
-        if (scanned_device_manufacture_data.length() >= 3) {
-            uint8_t companyID0 = (uint8_t)scanned_device_manufacture_data[0];
-            uint8_t companyID1 = (uint8_t)scanned_device_manufacture_data[1];
-
-            // Check for correct manufacture data and stop scanning and connect to it
-            if (companyID0 == 0xFF && companyID1 == 0xFF) {
-                BLEDevice::getScan()->stop();
-                target_device = new BLEAdvertisedDevice(advertisedDevice);
-                Serial.printf("attempting to connect to device: %s", advertisedDevice.toString().c_str());
-                found_device = true;
-            }
-        }
-
-      }
-
-      // Print the basic info: Name, Address, and Signal Strength (RSSI)
-      // Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
-    }
-};
-
-BLECharacteristic *pCharacteristic;
-
-
-/*
+/* ------------------------------
 Set up for AWS IOT Core and MQTT
-*/
+--------------------------------*/ 
 #include <WiFiClientSecure.h> // TLS encryption
 #define MQTT_MAX_PACKET_SIZE 2048 // Adjust based on expected AI response length
 #include <PubSubClient.h> // MQTT protocol
@@ -250,9 +115,9 @@ void connectWiFi() {
 
 void send_message_to_aws(const String& message) {
   if (MQTT_client.connected()) {
-    String msg = "{\"message\":\"" + message + "\"}";
+    String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
     MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
-    Serial.println("Published: " + msg);
+    Serial.println("Published to MQTT IOT CORE: " + msg);
   } else {
     Serial.println("MQTT not connected, cannot publish");
   }
@@ -285,7 +150,7 @@ void connectAWS() {
 
   Serial.println("Connecting to AWS IoT...");
   while (!MQTT_client.connected()) {
-    if (MQTT_client.connect("ESP_S3_Device")) {
+    if (MQTT_client.connect("ESP_S3_Device2")) {
       // SUBSCRIBE HERE
       // The topic must match what your Lambda is publishing to
       MQTT_client.subscribe(MQTT_TOPIC_SUB); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
@@ -301,6 +166,146 @@ void connectAWS() {
     }
   }
 }
+
+// --------------
+// BLE SET UP
+// --------------
+#define SECRET 0x5A // secret for handshake protocl
+
+// The server to connect to
+// The UUIDs of the service and characteristic you want to talk to
+static BLEUUID target_serviceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+static BLEUUID target_charUUID("beb5483e-36e1-4688-b7f5-ea07361b26a8");
+static BLEUUID target_authentication_UUID("aeb5483e-36e1-4688-b7f5-ea07361b26a8");
+
+// Server setup for python script to connect to
+bool is_connected; // if its connected to python script to be interacted with 
+
+// flag if handshake is needed
+bool need_handshake = false; 
+
+// scanning configs
+int scanTime = 2; // Scan duration in seconds
+BLEScan* pBLEScan;
+
+// configs for connecting to other MCU
+static BLEAdvertisedDevice* target_device;
+static BLERemoteCharacteristic* target_pcharacteristic;
+static BLERemoteCharacteristic* target_auth_characteristic;
+static BLERemoteService* target_premoteService;
+bool found_device = false;
+bool connect_to_device = false;
+
+// configs for messaging to server
+bool new_data = false; 
+String new_data_string;
+
+// attempts to send message to server that MCU is connected to
+void send_data_to_server(String message){
+  target_pcharacteristic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+  Serial.println("Sent: " + message);
+}
+
+//attempts to connect to the server given the myDevice
+void connect_to_server(){
+  BLEClient* pClient  = BLEDevice::createClient();
+  pClient->connect(target_device); // Connect to the remote BLE Server
+  target_premoteService = pClient->getService(target_serviceUUID);
+  target_pcharacteristic = target_premoteService->getCharacteristic(target_charUUID);
+  target_auth_characteristic = target_premoteService->getCharacteristic(target_authentication_UUID);
+
+  if(target_pcharacteristic->canRead()) {
+    std::string value = target_pcharacteristic->readValue();
+    Serial.print("The characteristic value was: ");
+    Serial.println(value.c_str());
+  }
+}
+
+void perform_handshake(){
+  // Step 1: read nonce from server
+  std::string value = target_auth_characteristic->readValue();
+  if (value.length() < 1) return;
+
+  uint8_t nonce = (uint8_t)value[0]; // process info to correct data type = unsigned 8 int 
+  Serial.print("Nonce received: ");
+  Serial.println(nonce);
+
+  // Step 2: compute response
+  uint8_t response = nonce ^ SECRET;
+
+  // Step 3: write response back
+  target_auth_characteristic->writeValue(&response, 1, true);
+  Serial.print("Response sent: ");
+  Serial.println(response);
+
+  send_data_to_server("Hello!");
+  
+  return;
+}
+
+// 2. Callback Class: This is the "brain" that reacts to your phone
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+      std::string value = pCharacteristic->getValue();
+      
+      if (value.length() > 0) {
+        char command = value[0];
+        Serial.print("Received Value: ");
+        Serial.println(command);
+        
+        // sets bool to true so code knows there is data avaiable to send
+        new_data = true;
+        new_data_string = String(value.c_str());
+      }
+    }
+};
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      Serial.println("Device connected! 📱");
+      is_connected = true; // enables scanning for device now
+      need_handshake = true;
+
+      Serial.println("closing advertising so no other devices can connect...");
+      BLEDevice::getAdvertising()->stop(); // stop advertising so other devices cant connect while one is already connected
+    }
+    
+    // need to refactor this 
+    void onDisconnect(BLEServer* pServer) {
+      Serial.println("Device disconnected... 🔌");
+      // This is the key: tell the ESP32 to start advertising again
+      BLEDevice::startAdvertising();
+      Serial.println("Restarted advertising!");
+    }
+};
+
+// This class handles what happens when a device is found
+class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) {      
+      if (advertisedDevice.haveManufacturerData()){ 
+        std::string scanned_device_manufacture_data = advertisedDevice.getManufacturerData();
+
+         // Make sure it has at least 3 bytes
+        if (scanned_device_manufacture_data.length() >= 3) {
+            uint8_t companyID0 = (uint8_t)scanned_device_manufacture_data[0];
+            uint8_t companyID1 = (uint8_t)scanned_device_manufacture_data[1];
+
+            // Check for correct manufacture data and stop scanning and connect to it
+            if (companyID0 == 0xFF && companyID1 == 0xFF) {
+                BLEDevice::getScan()->stop();
+                target_device = new BLEAdvertisedDevice(advertisedDevice);
+                Serial.printf("attempting to connect to device: %s", advertisedDevice.toString().c_str());
+                found_device = true;
+            }
+        }
+
+      }
+      // Print the basic info: Name, Address, and Signal Strength (RSSI)
+      // Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
+    }
+};
+
+BLECharacteristic *pCharacteristic;
 
 void setup() {
   Serial.begin(115200);
@@ -358,7 +363,6 @@ const unsigned long scanInterval = 30000; // 30 seconds
 void loop() {
   // put your main code here, to run repeatedly:
 
-
   // ensure connection to AWS IOT CORE stays alive
   if (!MQTT_client.connected()) {
     connectAWS();
@@ -375,7 +379,7 @@ void loop() {
     pBLEScan->clearResults();
     lastScanTime = millis(); // Update the last scan time
   }
-  
+
   if (found_device){
     connect_to_server();
     found_device = false; // so it doesnt repeat and keep trying to connect to it
