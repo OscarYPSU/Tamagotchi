@@ -213,7 +213,6 @@ class server_system_call_backs: public BLEServerCallbacks {
 
       Serial.println("closing advertising so no other devices can connect...");
       BLEDevice::getAdvertising()->stop(); // stop advertising so other devices cant connect while one is already connected
-
     };
     // when disconnected, it will open up adveritising again to allow other device to connect !!! need to work on multi connection and see if thats possible
     void onDisconnect(BLEServer* pServer) {
@@ -255,7 +254,7 @@ void setup() {
   BLEDevice::init("ESP32-S3-Server");
   BLEServer *p_server = BLEDevice::createServer();
   BLEService *p_server_service = p_server->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
-
+  
   // Create the characteristic BEFORE starting the service
   server_p_characteristic = p_server_service->createCharacteristic(
     "beb5483e-36e1-4688-b7f5-ea07361b26a8",
