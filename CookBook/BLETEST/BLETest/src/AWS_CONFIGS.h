@@ -29,6 +29,7 @@ extern const char* CUR_DEVICE_CERT;
 extern const char* CUR_PRIVATE_KEY;
 extern const char* CUR_MQTT_TOPIC_PUB;
 extern const char* CUR_MQTT_TOPIC_SUB;
+extern const char* DEVICE_NAME_AWS; // specific device name to use for AWS IOT CORE connection, can be used for logging purposes in AWS IOT CORE to identify which device is which
 
 // for AWS IOT CORE connection and MQTT protocl
 #include <WiFiClientSecure.h> // TLS encryption
@@ -38,7 +39,7 @@ extern const char* CUR_MQTT_TOPIC_SUB;
 extern WiFiClientSecure net; // TCP encrypted by TLS
 extern PubSubClient MQTT_client; // tells the MQTT protocol to use this TCP/IP with TLS
 
-void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB);
+void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB, const char* DEVICE_NAME);
 void send_message_to_aws(const String& message, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB);
 void receive_response_from_AWS(char* topic, byte* payload, unsigned int length);
 #endif

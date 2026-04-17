@@ -12,15 +12,26 @@ BLECharacteristic *p_advertiser_characteristic;
 BLECharacteristic *p_advertiser_auth_characteristic; // for authentication process
 BLEAdvertising *p_advertise;
 BLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
-
+unsigned long lastSwitchTime = 0;
+unsigned long nextInterval = 3000; // Start with 3 seconds
+// (0 = idle, 1 = scanning, 2 = advertiser)
+char current_state = 0; // variable to keep track of the current state of the device, can be used for more complex interactions in the future
+BLEAdvertisedDevice* target_device;;
 // -----------
 // BLE SETUP for advertiser mode
 // -----------
+
+
 void setup_advertising_mode(){
     Serial.println("Setting up advertising mode...");
     BLEDevice::init(DEVICE_NAME);
     BLEServer *p_advertiser = BLEDevice::createServer();
     BLEService *p_advertiser_service = p_advertiser->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+    
+    // create and attach the data to attatch to advertising data
+    std::string manufacture_data = "";
+    manufacture_data += (char)0xFF; // Company ID byte 1
+    manufacture_data += (char)0xFF; // Company ID byte 2
 
     // Create the characteristic 
     p_advertiser_characteristic = p_advertiser_service->createCharacteristic(
@@ -42,8 +53,7 @@ void setup_advertising_mode(){
     p_advertise = BLEDevice::getAdvertising(); // gets adveritising pointer from device so we can customize and start it
 
     // create and attach the data to attatch to advertising data
-    std::string manufacturerData = "Oscar's BLE Device"; // this is the data that will be broadcasted in the advertising signal, can be used to identify the device or for other purposes
-    advertising_data.setManufacturerData(manufacturerData); // attach the data to advertising data
+    advertising_data.setManufacturerData(manufacture_data); // attach the data to advertising data
     p_advertise->setAdvertisementData(advertising_data); // attach the adveritising data to advertise pointer
     p_advertise->setScanResponse(true); // "bonus data to send in response to active scanning, can be used to send more data about the device since advertising data has a strict size limit"
 }   
@@ -109,4 +119,81 @@ void advertiser_authentication_callbacks::onWrite(BLECharacteristic *self_charac
 };
 
 
+// ------------
+// BLE scanning and connecting to other device as a client
+// ------------
+BLEScan* p_scanner;
+bool found_device = false;
+// This function handles what happens when a device is found
+void scanner_scan_callbacks::onResult(BLEAdvertisedDevice advertisedDevice) {      
+    // Print the basic info: Name, Address, and Signal Strength (RSSI)
+    Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
+    if (advertisedDevice.haveManufacturerData()){ 
+        std::string scanned_device_manufacture_data = advertisedDevice.getManufacturerData();
+        uint8_t companyID0 = (uint8_t)scanned_device_manufacture_data[0];
+        uint8_t companyID1 = (uint8_t)scanned_device_manufacture_data[1];
+        // Check for correct manufacture data and stop scanning and connect to it
+        if (companyID0 == 0xFF && companyID1 == 0xFF) {
+            found_device = true;
+            Serial.printf("attempting to connect to device: %s\n", advertisedDevice.toString().c_str());
+            Serial.println();
+            BLEDevice::getScan()->stop();
+            target_device = new BLEAdvertisedDevice(advertisedDevice);
+            connect_to_server(target_device);
+        }    
+    }
+};
 
+// sets up the device to be able to scan and connect to other BLE devices as a client, WARNING, ALWAYS SET UP ADVERTISING MODE FIRST BEFORE CALLING THIS FUNCTION, 
+void setup_scanning_mode(){
+    Serial.println("Setting up scanning mode...");
+    p_scanner = BLEDevice::getScan();
+    p_scanner->setAdvertisedDeviceCallbacks(new scanner_scan_callbacks()); // attaches scan callback to handle what happens when a device is found
+
+    p_scanner->setActiveScan(true); // Active scan gathers more data (like names) but uses more power
+    p_scanner->setInterval(100);
+    p_scanner->setWindow(99);
+}
+
+//attempts to connect to the server given the myDevice
+void connect_to_server(BLEAdvertisedDevice* target_device){
+    Serial.println("Forming a connection to the target device...");
+    BLEClient* p_connector = BLEDevice::createClient();
+    if(p_connector->connect(target_device)) { // Connect to the remote BLE Servers
+        Serial.println("Connected to the target device!");
+    } else {
+        Serial.println("Failed to connect to the target device.");
+        found_device = false; // reset found device so it can try to find and connect again
+    }
+}
+
+// an functiont that should be repeatdely ran to check for switching between advertising and scanning mode every few seconds, this is to ensure that both devices can find each other and connect even if they start up at different times, or if the connection drops and they need to find each other again
+void check_dual_mode(){
+    if (!found_device && millis() - lastSwitchTime >= nextInterval) {
+        // 1. Reset the timer
+        lastSwitchTime = millis();
+        
+        // 2. Pick a new random interval for the NEXT switch (e.g., 2-5 seconds)
+        nextInterval = 2000 + random(0, 3000); 
+        
+        // scanner mode
+        if (current_state == 1 || current_state == 0) { // if currently scanning or idle, switch to advertising
+            Serial.println("Current Mode: SCANs/IDLE, Switching to ADVERTISING");
+            p_scanner->stop(); // stop scanning so it can start advertising without issues
+            p_scanner->clearResults(); // clear results to reset found devices so it can find again in the future if needed
+            send_advertising_signal();
+            current_state = 2;
+        } elif (current_state == 2 && p_advertise->isAdvertising()){ // if currently advertising, switch to scanning
+            Serial.println("Current Mode: ADVERTISING, Switching to SCANNING");
+            stop_advertising_signal();
+            // Logging
+            Serial.println("Starting scanner...");
+            p_scanner->start(2, false);
+            Serial.println("Scanner started!");
+
+            current_state = 1;
+        }
+        Serial.print("Next switch in: ");
+        Serial.println(nextInterval);
+    } 
+}

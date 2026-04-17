@@ -18,29 +18,31 @@ void setup() {
         CUR_PRIVATE_KEY  = DEVICE_1_PRIVATE_KEY;
         CUR_MQTT_TOPIC_SUB = DEVICE_1_MQTT_TOPIC_PUB;
         CUR_MQTT_TOPIC_PUB = DEVICE_1_MQTT_TOPIC_SUB;
-        DEVICE_NAME = "ESP32-S3-Device1";
+        DEVICE_NAME_AWS = "Device1";
     } else {
         CUR_DEVICE_CERT = DEVICE_2_CERT;
         CUR_PRIVATE_KEY  = DEVICE_2_PRIVATE_KEY;
         CUR_MQTT_TOPIC_SUB = DEVICE_2_MQTT_TOPIC_PUB;
         CUR_MQTT_TOPIC_PUB = DEVICE_2_MQTT_TOPIC_SUB;
-        DEVICE_NAME = "ESP32-S3-Device2";
+        DEVICE_NAME_AWS = "Device2";
     }
     // Now proceed to connectAWS() using these selected variables
-    connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB);
+    connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, DEVICE_NAME_AWS);
 
     // -----------
     // BLE SETUP for advertiser mode
     // -----------
     setup_advertising_mode();
-
-    send_advertising_signal(); // start advertising so other device can find and connect to it
+    setup_scanning_mode();
+    delay(1000); // small delay to ensure everything is set up before starting the loop, can be adjusted or removed if not needed
 }
 
 void loop(){
     // ensure connection stays alive
     if (!MQTT_client.connected()) {
-        connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB);
+        connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, DEVICE_NAME_AWS);
+    } else {
+        check_dual_mode();
     }
-    MQTT_client.loop();
+    MQTT_client.loop(); // checks for incoming messages and keeps the connection alive, this should be called regularly in the main loop
 }

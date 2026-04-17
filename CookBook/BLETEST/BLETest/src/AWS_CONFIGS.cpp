@@ -156,6 +156,7 @@ const char* CUR_DEVICE_CERT;
 const char* CUR_PRIVATE_KEY;
 const char* CUR_MQTT_TOPIC_PUB;
 const char* CUR_MQTT_TOPIC_SUB;
+const char* DEVICE_NAME_AWS; // for logging purposes to identify which device is which in the serial monitor
 
 WiFiClientSecure net;
 PubSubClient MQTT_client(net);
@@ -174,7 +175,7 @@ void connectWiFi() {
 }
 
 // connecting to AWS IOT CORE via MQTT
-void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB) {
+void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB, const char* DEVICE_NAME_AWS) {
   net.setCACert(AWS_ROOT_CA);
   net.setCertificate(DEVICE_CERT);
   net.setPrivateKey(PRIVATE_KEY);
@@ -184,12 +185,14 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
 
   Serial.println("Connecting to AWS IoT...");
   while (!MQTT_client.connected()) {
-    if (MQTT_client.connect("ESP_S3_Device1")) {
+    if (MQTT_client.connect(DEVICE_NAME_AWS)) {
       // SUBSCRIBE HERE
       // The topic must match what your Lambda is publishing to
       MQTT_client.subscribe(MQTT_TOPIC_SUB); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
       
       // Logs 
+      Serial.print("Device: ");
+      Serial.println(DEVICE_NAME_AWS);
       Serial.println("Subscribed to OpenAI response topic.");
       Serial.println("Connected to AWS IoT!");
     } else {
