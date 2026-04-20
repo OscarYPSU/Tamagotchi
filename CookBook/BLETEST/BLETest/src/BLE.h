@@ -19,14 +19,16 @@ extern NimBLEAdvertisementData advertising_data;
 extern NimBLEScan* p_scanner;
 extern NimBLEAdvertisedDevice* target_device;
 extern NimBLEClient* p_connector; 
+extern NimBLERemoteCharacteristic  *target_auth_characteristic; // Scanner sending to advertiser for handshake purpose
+extern NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server after handshake is complete, we store it here after we discover it in the onConnect callback of the client so we can use it later in the main loop to send data to the server after the handshake is complete
 
 // State variables
 extern bool found_device; 
 extern bool connected;
 extern bool need_handshake;
-extern unsigned long lastSwitchTime;
 extern unsigned long nextInterval; 
 extern char current_state; 
+
 
 // SCANNER
 class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
@@ -59,5 +61,6 @@ class advertiser_authentication_callbacks : public NimBLECharacteristicCallbacks
 void stop_advertising_signal();
 void send_advertising_signal();
 void setup_advertising_mode();
+void send_data_to_server(String message);
 
 #endif

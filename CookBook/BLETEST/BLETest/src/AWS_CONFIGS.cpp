@@ -193,7 +193,7 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
       // Logs 
       Serial.print("Device: ");
       Serial.println(DEVICE_NAME_AWS);
-      Serial.println("Subscribed to OpenAI response topic.");
+      Serial.println("Subscribed to OpenAI response topic at: " + String(MQTT_TOPIC_SUB));
       Serial.println("Connected to AWS IoT!");
     } else {
       Serial.print("Failed, rc=");
@@ -205,6 +205,9 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
 
 void send_message_to_aws(const String& message, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
   if (MQTT_client.connected()) {
+    
+
+    Serial.println("Publishing message to AWS IoT Core... at topic: " + String(MQTT_TOPIC_PUB));
     String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
     MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
     Serial.println("Published to MQTT IOT CORE: " + msg);
@@ -213,19 +216,32 @@ void send_message_to_aws(const String& message, const char* MQTT_TOPIC_SUB, cons
   }
 }
 
+
 void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) {
   Serial.print("Response received on topic: ");
   Serial.println(topic);
 
-  // Convert the byte payload into a readable String
-  String message = "";
-  for (int i = 0; i < length; i++) {
-    message += (char)payload[i];
-  }
+  // 1. Create a document to hold the parsed JSON
+  JsonDocument data_from_aws;
+  // 2. Deserialize (parse) the incoming bytes
+  DeserializationError error = deserializeJson(data_from_aws, payload, length);
 
-  // Print the ChatGPT response to your Serial Monitor
-  Serial.println("--- OpenAI Response ---");
-  Serial.println(message);
-  Serial.println("-----------------------");
+  if (error) {
+    Serial.print("JSON parsing failed: ");
+    Serial.println(error.f_str());
+  } else {
+    // 3. Extract just the "message" value
+    const char* message_text = data_from_aws["message"];
+
+    if (message_text) {
+      Serial.println("--- OpenAI Message ---");
+      Serial.println(message_text);
+      Serial.println("-----------------------");
+    }
+
+    // forwards the response to the other device
+    send_data_to_server(message_text); 
+
+  }
 }
 

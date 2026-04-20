@@ -120,6 +120,7 @@ bool found_device = false;
 bool connected = false;
 bool need_handshake = false;
 NimBLERemoteCharacteristic  *target_auth_characteristic; // for authentication process
+NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server after handshake is complete, we store it here after we discover it in the onConnect callback of the client so we can use it later in the main loop to send data to the server after the handshake is complete
 
 // --- CLIENT CALLBACKS ---
 // Handles events when WE connect to a remote device
@@ -130,13 +131,14 @@ class client_callbacks : public NimBLEClientCallbacks {
         connected = true;
 
         // After connecting, we need to find the correct characteristic for authentication
-        NimBLERemoteService* target_remote_service = pClient->getService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        NimBLERemoteService* target_remote_service = pClient->getService("4fafc201-1fb5-459e-8fcc-c5c9c331914b"); // grab the service that we know has the authentication characteristic on it, we need to do this because we cannot directly grab the characteristic without first grabbing the service it is on, and we also want to verify that the service exists before trying to grab the characteristic
         if (target_remote_service) {
-            target_auth_characteristic = target_remote_service->getCharacteristic("aeb5483e-36e1-4688-b7f5-ea07361b26a8");
-            if (target_auth_characteristic) {
-                Serial.println("Found authentication characteristic! Ready to perform handshake.");
+            target_auth_characteristic = target_remote_service->getCharacteristic("aeb5483e-36e1-4688-b7f5-ea07361b26a8"); // grab the authentication characteristic so we can perform the handshake in the main loop, we do this because we cannot call perform_handshake directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
+            target_characterstic = target_remote_service->getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8"); // also grab the data characteristic so we can use it later to send data to the server after handshake is complete
+            if (target_auth_characteristic && target_characterstic) {
+                Serial.println("Found authentication and sending data characteristic! Ready to perform handshake.");
             } else {
-                Serial.println("Failed to find authentication characteristic. Disconnecting...");
+                Serial.println("Failed to find one or both characteristics. Disconnecting...");
                 pClient->disconnect();
             }
         } else {
@@ -178,6 +180,7 @@ void scanner_scan_callbacks::onResult(NimBLEAdvertisedDevice* advertisedDevice) 
                 target_device = advertisedDevice; // store the target device so we can connect to it in the main loop, we do this because we cannot call connect directly from this callback function
             } else {
                 Serial.println("I have the lower MAC. I will stay in 'Server mode' and wait for them.");
+                found_device = false; // we will stay in advertiser mode and wait for the other device to connect to us, we do this because we cannot call setup_advertising_mode directly from this callback function since it needs to set up the whole advertising service and characteristics which can only be done in the main loop after this callback is called.
                 // We do nothing here; we just keep scanning/advertising
             }
             // -----------------------------
@@ -191,9 +194,10 @@ void setup_scanning_mode(){
     p_scanner = NimBLEDevice::getScan();
     p_scanner->setAdvertisedDeviceCallbacks(new scanner_scan_callbacks()); 
 
-    // '0' means scan forever, 'false' means non-blocking
+    // '2' means scan for 2 seconds, 'false' means non-blocking
     p_scanner->setActiveScan(true);
-    p_scanner->start(0, false);
+    p_scanner->start(2, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
+    Serial.println("Started scanning mode...");
 }
 
 //atempts to connect to the server  
@@ -230,8 +234,11 @@ void perform_handshake(){
     Serial.print("Response sent: ");
     Serial.println(response);
 
-    //send_data_to_server("Hello!");
-        need_handshake = false; // reset handshake state so it doesnt keep trying to perform handshake
+    send_data_to_server("Hello!"); // simple test for sending data
+    need_handshake = false; // reset handshake state so it doesnt keep trying to perform handshake
+}
 
-    return;
+void send_data_to_server(String message){
+    target_characterstic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+    Serial.println("Sent: " + message);
 }

@@ -2,6 +2,8 @@
 #define AWS_CONFIG_H    // ...then define it
 
 #include <Arduino.h>
+#include "BLE.h"
+#include <ArduinoJson.h> // for parsing the response from AWS Lambda, this library is included in the platformio.ini file and can be used to parse the JSON response from Lambda into a more readable format, you can also choose to parse it manually without this library if you prefer
 
 // WIFI CONFIGS
 #include <WiFi.h>
