@@ -232,6 +232,8 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
   } else {
     // 3. Extract just the "message" value
     const char* message_text = data_from_aws["message"];
+    // Wrap the char* in std::string() to convert it
+    std::string message_text_string_form = std::string(message_text);
 
     if (message_text) {
       Serial.println("--- OpenAI Message ---");
@@ -240,8 +242,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     }
 
     // forwards the response to the other device
-    send_data_to_server(message_text); 
-
+    send_message_to_connected_device(message_text_string_form); 
   }
 }
 

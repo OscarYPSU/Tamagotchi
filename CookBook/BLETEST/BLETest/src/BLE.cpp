@@ -111,6 +111,15 @@ void advertiser_authentication_callbacks::onWrite(NimBLECharacteristic *self_cha
     }
 };
 
+void send_message_to_connected_device(std::string& message) {
+    if (connected && allowed_connection) {
+        p_advertiser_characteristic->setValue(message); // set the value of the characteristic to the message we want to send
+        p_advertiser_characteristic->notify(); // notify the connected client that the value has changed so it can read it
+        Serial.println("Sent message to connected device: " + String(message.c_str()));
+    } else {
+        Serial.println("Cannot send message, no device connected or handshake not complete.");
+    }
+}
 
 // ------------
 // BLE scanning and connecting to other device as a client
@@ -123,6 +132,14 @@ NimBLERemoteCharacteristic  *target_auth_characteristic; // for authentication p
 NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server after handshake is complete, we store it here after we discover it in the onConnect callback of the client so we can use it later in the main loop to send data to the server after the handshake is complete
 
 // --- CLIENT CALLBACKS ---
+
+// Define the callback function that runs when data arrives
+void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify) {
+    std::string value((char*)data, length);
+    Serial.println("Received from Advertiser: " + String(value.c_str()));
+}
+
+
 // Handles events when WE connect to a remote device
 class client_callbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
@@ -136,6 +153,9 @@ class client_callbacks : public NimBLEClientCallbacks {
             target_auth_characteristic = target_remote_service->getCharacteristic("aeb5483e-36e1-4688-b7f5-ea07361b26a8"); // grab the authentication characteristic so we can perform the handshake in the main loop, we do this because we cannot call perform_handshake directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
             target_characterstic = target_remote_service->getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8"); // also grab the data characteristic so we can use it later to send data to the server after handshake is complete
             if (target_auth_characteristic && target_characterstic) {
+                if(target_characterstic->canNotify()) {
+                    target_characterstic->subscribe(true, notify_call_backs); // subscribe to the  characteristic to receive messages  when the server sends us the messages after handshake is complete, we do this because we cannot call notify_call_backs directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.  
+                }
                 Serial.println("Found authentication and sending data characteristic! Ready to perform handshake.");
             } else {
                 Serial.println("Failed to find one or both characteristics. Disconnecting...");

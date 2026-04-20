@@ -62,5 +62,7 @@ void stop_advertising_signal();
 void send_advertising_signal();
 void setup_advertising_mode();
 void send_data_to_server(String message);
+void send_message_to_connected_device(std::string& message);
+void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify);
 
 #endif
