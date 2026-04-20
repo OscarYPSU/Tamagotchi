@@ -1,69 +1,63 @@
 #ifndef BLE_H
 #define BLE_H
 
-#include <BLEDevice.h>
-#include <BLEUtils.h>
-#include <BLEServer.h>
-#include <arduino.h>
+#include <Arduino.h>
+#include <NimBLEDevice.h> // Only one include needed
 #include "AWS_CONFIGS.h"
 
-#define SECRET 0x5A // secret for handshake protocl
+#define SECRET 0x5A 
 
-extern bool allowed_connection; // only true after handshake taht allows connected device to start sending data
-extern uint8_t nonce; // random nonce for authentication
-extern std::string DEVICE_NAME; // specific device name to initilize BLE with, can be used for scanning purposes to identify which device is which
+extern bool allowed_connection; 
+extern uint8_t nonce; 
+extern std::string DEVICE_NAME; 
 
-// Global pointers so we can reference them if needed
-extern BLECharacteristic *p_advertiser_characteristic; // characteristics of advertiser device that other device will interact with 
-extern BLECharacteristic *p_advertiser_auth_characteristic; // for authentication process
-extern BLEAdvertising *p_advertise; // advertising pointer to start and stop advertising when needed
-extern BLEAdvertising *p_advertise; // gets adveritising pointer from device so we can customize and start it
-extern BLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
-extern BLEScan* p_scanner;
-extern BLEAdvertisedDevice* target_device;
-extern BLEClient* p_connector; // the connector client that will be used to connect to the other device as a client, this is used in the scanning mode
+// Global pointers
+extern NimBLECharacteristic *p_advertiser_characteristic; 
+extern NimBLECharacteristic *p_advertiser_auth_characteristic; 
+extern NimBLEAdvertising *p_advertise; // Removed the duplicate line here
+extern NimBLEAdvertisementData advertising_data; 
+extern NimBLEScan* p_scanner;
+extern NimBLEAdvertisedDevice* target_device;
+extern NimBLEClient* p_connector; 
 
-// Variables that is used for switching between states in the main loop
-extern bool found_device; // whether the device has found the target device, used to determine when to connect to it
+// State variables
+extern bool found_device; 
+extern bool connected;
+extern bool need_handshake;
 extern unsigned long lastSwitchTime;
-extern unsigned long nextInterval; // Start with 3 seconds
-// (0 = idle, 1 = scanning, 2 = advertiser)
-extern char current_state; // variable to keep track of the current state of the device, can be used for more complex interactions in the future
-
-
+extern unsigned long nextInterval; 
+extern char current_state; 
 
 // SCANNER
-// This class handles what happens when a device is found
-class scanner_scan_callbacks: public BLEAdvertisedDeviceCallbacks {
-    void onResult(BLEAdvertisedDevice advertisedDevice);
+class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
+    // FIX 1: Must be a pointer (*)
+    void onResult(NimBLEAdvertisedDevice* advertisedDevice) override;
 };
 
-void connect_to_server(BLEAdvertisedDevice* device);
+void connect_to_server(NimBLEAdvertisedDevice* device);
 void setup_scanning_mode();
+void perform_handshake();
 
 // ADVERTISER
-// determines what happens data is received from connected devices
-class advertiser_interaction_callbacks : public BLECharacteristicCallbacks {
+class advertiser_interaction_callbacks : public NimBLECharacteristicCallbacks {
     public:
-        void onWrite(BLECharacteristic *pCharacteristic) override;
+        void onWrite(NimBLECharacteristic *pCharacteristic) override;
 };
 
-// startup callbacks for what happens the first time the other device connects to current device
-class advertiser_system_call_backs : public BLEServerCallbacks {
+class advertiser_system_call_backs : public NimBLEServerCallbacks {
     public:
-        void onConnect(BLEServer* self) override;
-        void onDisconnect(BLEServer* self) override;
+        // Already correct: NimBLE needs the 'desc'
+        void onConnect(NimBLEServer* self, ble_gap_conn_desc* desc) override;
+        void onDisconnect(NimBLEServer* self) override;
 };
 
-// advertiser authentication callback to verify that the connected device is of own devices
-class advertiser_authentication_callbacks : public BLECharacteristicCallbacks {
+class advertiser_authentication_callbacks : public NimBLECharacteristicCallbacks {
     public:
-        void onWrite(BLECharacteristic *pCharacteristic) override;
+        void onWrite(NimBLECharacteristic *pCharacteristic) override;
 };
 
 void stop_advertising_signal();
 void send_advertising_signal();
 void setup_advertising_mode();
 
-void check_dual_mode();
-#endif 
+#endif

@@ -1,3 +1,7 @@
 pio run -e "env"  == for building code for specifc env
 pio run -e "env" -t upload -t monitor == for uploading code and then opening the monior appropaite to that port and bard rate
 pio run -e "env" -t monitor == just for looking at the serial monitor for the MCU
+
+
+
+docker compose run --rm builder pio run -e "env " == for building a docker image of PIO

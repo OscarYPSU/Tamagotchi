@@ -1,0 +1,10 @@
+services:
+  builder:
+    image: pio-builder
+    volumes:
+      - .:/app
+      - pio_cache:/root/.platformio  # This line saves the downloads
+    command: pio run
+
+volumes:
+  pio_cache:  # This creates the persistent "bucket" on your hard drive

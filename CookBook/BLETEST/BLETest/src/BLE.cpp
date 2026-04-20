@@ -4,19 +4,21 @@
 #include "BLE.h"
 #define SECRET 0x5A // secret for handshake protocl
 
-
 bool allowed_connection = false; // only true after handshake that allows connected device to start sending data
 uint8_t nonce; // random nonce for authentication
 std::string DEVICE_NAME; // specific device name to initilize BLE with, can be used for scanning purposes to identify which device is which
-BLECharacteristic *p_advertiser_characteristic;
-BLECharacteristic *p_advertiser_auth_characteristic; // for authentication process
-BLEAdvertising *p_advertise;
-BLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
+
+NimBLECharacteristic *p_advertiser_characteristic;
+NimBLECharacteristic *p_advertiser_auth_characteristic; // for authentication process
+NimBLEAdvertising *p_advertise;
+NimBLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
 unsigned long lastSwitchTime = 0;
 unsigned long nextInterval = 3000; // Start with 3 seconds
 // (0 = idle, 1 = scanning, 2 = advertiser)
 char current_state = 0; // variable to keep track of the current state of the device, can be used for more complex interactions in the future
-BLEAdvertisedDevice* target_device;;
+NimBLEAdvertisedDevice* target_device; // Swapped to NimBLE
+
+
 // -----------
 // BLE SETUP for advertiser mode
 // -----------
@@ -24,23 +26,23 @@ BLEAdvertisedDevice* target_device;;
 
 void setup_advertising_mode(){
     Serial.println("Setting up advertising mode...");
-    BLEDevice::init(DEVICE_NAME);
-    BLEServer *p_advertiser = BLEDevice::createServer();
-    BLEService *p_advertiser_service = p_advertiser->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+    NimBLEDevice::init(DEVICE_NAME); // NimBLE version
+    NimBLEServer *p_advertiser = NimBLEDevice::createServer();
+    NimBLEService *p_advertiser_service = p_advertiser->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
     
     // create and attach the data to attatch to advertising data
     std::string manufacture_data = "";
     manufacture_data += (char)0xFF; // Company ID byte 1
     manufacture_data += (char)0xFF; // Company ID byte 2
 
-    // Create the characteristic 
+    // Create the characteristic - Swapped to NIMBLE_PROPERTY namespace
     p_advertiser_characteristic = p_advertiser_service->createCharacteristic(
         "beb5483e-36e1-4688-b7f5-ea07361b26a8",
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
     );
     p_advertiser_auth_characteristic = p_advertiser_service->createCharacteristic(
         "aeb5483e-36e1-4688-b7f5-ea07361b26a8", // auth UUID
-        BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE
+        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
     );
 
     // Link our Callback class to the characteristic
@@ -50,28 +52,21 @@ void setup_advertising_mode(){
 
     p_advertiser_service->start(); // Finish creating the service
     
-    p_advertise = BLEDevice::getAdvertising(); // gets adveritising pointer from device so we can customize and start it
+    p_advertise = NimBLEDevice::getAdvertising(); // NimBLE version
 
     // create and attach the data to attatch to advertising data
-    advertising_data.setManufacturerData(manufacture_data); // attach the data to advertising data
-    p_advertise->setAdvertisementData(advertising_data); // attach the adveritising data to advertise pointer
-    p_advertise->setScanResponse(true); // "bonus data to send in response to active scanning, can be used to send more data about the device since advertising data has a strict size limit"
-}   
+    p_advertise->setManufacturerData(manufacture_data); // NimBLE handles this directly on the advertiser object usually
+    p_advertise->setScanResponse(true); 
 
-void send_advertising_signal(){
     p_advertise->start();
     Serial.println("Started advertising...");
-}
+}   
 
-void stop_advertising_signal(){
-    p_advertise->stop();
-    Serial.println("Stopped advertising...");
-}
 
 // determines what happens data is received from connected devices
-void advertiser_interaction_callbacks::onWrite(BLECharacteristic *self_characterstic) {
+void advertiser_interaction_callbacks::onWrite(NimBLECharacteristic *self_characteristic) {
       if (allowed_connection){
-        std::string value = self_characterstic->getValue();
+        std::string value = self_characteristic->getValue();
         Serial.print("Received value: ");
         Serial.println(value.c_str());
 
@@ -80,8 +75,10 @@ void advertiser_interaction_callbacks::onWrite(BLECharacteristic *self_character
       }
 };
 
-void advertiser_system_call_backs::onConnect(BLEServer* self) {
+// Updated signature with ble_gap_conn_desc* desc
+void advertiser_system_call_backs::onConnect(NimBLEServer* self, ble_gap_conn_desc* desc) {
     Serial.println("Device attempting to connect, sending authentication challenge!");      
+    connected = true; // we are now connected, but not necessarily authenticated yet, we will use this variable to keep track of the connection state and avoid multiple connections at onceq
 
     // Generate a new random nonce
     nonce = random(1, 255);
@@ -89,24 +86,20 @@ void advertiser_system_call_backs::onConnect(BLEServer* self) {
     p_advertiser_auth_characteristic->setValue(&nonce, 1); // setting the value of the auth char so client can grab it and sent the answer
     Serial.print("Nonce sent to client: ");
     Serial.println(nonce);
-
-    Serial.println("closing advertising so no other devices can connect...");
-    BLEDevice::getAdvertising()->stop(); // stop advertising so other devices cant connect while one is already connected
 };
 
-void advertiser_system_call_backs::onDisconnect(BLEServer* self) {
+void advertiser_system_call_backs::onDisconnect(NimBLEServer* self) {
     Serial.println("Device disconnected... 🔌");
-      
+    connected = false; // reset connection state
     allowed_connection = false;  // reset auth
-    // This is the key: tell the ESP32 to start advertising again
-    BLEDevice::startAdvertising();
-    Serial.println("Restarted advertising!");
+    NimBLEDevice::getAdvertising()->start(); // restart advertising so other devices can find and connect to us
+    Serial.println("Resumed advertising... 📢");
 };
 
 
 // advertiser authentication callback to verify that the connected device is of own devices
-void advertiser_authentication_callbacks::onWrite(BLECharacteristic *self_characterstic) {
-    std::string value = self_characterstic->getValue();
+void advertiser_authentication_callbacks::onWrite(NimBLECharacteristic *self_characteristic) {
+    std::string value = self_characteristic->getValue();
     if (value.length() < 1) return; // not valid
     uint8_t response = (uint8_t)value[0]; // process value into response data form (unsigned int 8)
     if (response == (nonce ^ SECRET)) {  // ✅ verify XOR  authentication
@@ -122,78 +115,123 @@ void advertiser_authentication_callbacks::onWrite(BLECharacteristic *self_charac
 // ------------
 // BLE scanning and connecting to other device as a client
 // ------------
-BLEScan* p_scanner;
+NimBLEScan* p_scanner;
 bool found_device = false;
-// This function handles what happens when a device is found
-void scanner_scan_callbacks::onResult(BLEAdvertisedDevice advertisedDevice) {      
+bool connected = false;
+bool need_handshake = false;
+NimBLERemoteCharacteristic  *target_auth_characteristic; // for authentication process
+
+// --- CLIENT CALLBACKS ---
+// Handles events when WE connect to a remote device
+class client_callbacks : public NimBLEClientCallbacks {
+    void onConnect(NimBLEClient* pClient) {
+        Serial.println(">>> We connected to peer (We are Central/Client)");
+        need_handshake = true; // we will perform the handshake in the main loop, we do this because we cannot call perform_handshake directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
+        connected = true;
+
+        // After connecting, we need to find the correct characteristic for authentication
+        NimBLERemoteService* target_remote_service = pClient->getService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
+        if (target_remote_service) {
+            target_auth_characteristic = target_remote_service->getCharacteristic("aeb5483e-36e1-4688-b7f5-ea07361b26a8");
+            if (target_auth_characteristic) {
+                Serial.println("Found authentication characteristic! Ready to perform handshake.");
+            } else {
+                Serial.println("Failed to find authentication characteristic. Disconnecting...");
+                pClient->disconnect();
+            }
+        } else {
+            Serial.println("Failed to find target service. Disconnecting...");
+            pClient->disconnect();
+        }
+    }
+    void onDisconnect(NimBLEClient* pClient) {
+        Serial.println(">>> Client disconnected. Resuming scan...");
+        connected = false; 
+        need_handshake = false; // reset handshake state
+        NimBLEDevice::getScan()->start(0, false);
+    }
+};
+
+
+void scanner_scan_callbacks::onResult(NimBLEAdvertisedDevice* advertisedDevice) {      
     // Print the basic info: Name, Address, and Signal Strength (RSSI)
-    Serial.printf("Found Device: %s \n", advertisedDevice.toString().c_str());
-    if (advertisedDevice.haveManufacturerData()){ 
-        std::string scanned_device_manufacture_data = advertisedDevice.getManufacturerData();
+    // Serial.printf("Found Device: %s \n", advertisedDevice->toString().c_str());
+
+    if (advertisedDevice->haveManufacturerData()){ 
+        std::string scanned_device_manufacture_data = advertisedDevice->getManufacturerData();
         uint8_t companyID0 = (uint8_t)scanned_device_manufacture_data[0];
         uint8_t companyID1 = (uint8_t)scanned_device_manufacture_data[1];
+
         // Check for correct manufacture data and stop scanning and connect to it
         if (companyID0 == 0xFF && companyID1 == 0xFF) {
-            found_device = true;
-            Serial.printf("attempting to connect to device: %s\n", advertisedDevice.toString().c_str());
-            Serial.println();
-            BLEDevice::getScan()->stop();
-            target_device = new BLEAdvertisedDevice(advertisedDevice);
-            connect_to_server(target_device);
+            Serial.print("Target device found: ");
+            Serial.print(advertisedDevice->getAddress().toString().c_str());
+            Serial.print(" | Name: ");
+            Serial.println(advertisedDevice->getName().c_str());
+
+            // --- NEW TIE-BREAKER LOGIC ---
+            // Compare my address to the found device's address
+            if (NimBLEDevice::getAddress() > advertisedDevice->getAddress()) {
+                Serial.println("I have the higher MAC. I will initiate the connection!");
+                found_device = true;
+                NimBLEDevice::getScan()->stop();
+                target_device = advertisedDevice; // store the target device so we can connect to it in the main loop, we do this because we cannot call connect directly from this callback function
+            } else {
+                Serial.println("I have the lower MAC. I will stay in 'Server mode' and wait for them.");
+                // We do nothing here; we just keep scanning/advertising
+            }
+            // -----------------------------
         }    
     }
 };
 
-// sets up the device to be able to scan and connect to other BLE devices as a client, WARNING, ALWAYS SET UP ADVERTISING MODE FIRST BEFORE CALLING THIS FUNCTION, 
+// sets up the device to be able to scan and connect to other BLE devices as a client
 void setup_scanning_mode(){
     Serial.println("Setting up scanning mode...");
-    p_scanner = BLEDevice::getScan();
-    p_scanner->setAdvertisedDeviceCallbacks(new scanner_scan_callbacks()); // attaches scan callback to handle what happens when a device is found
+    p_scanner = NimBLEDevice::getScan();
+    p_scanner->setAdvertisedDeviceCallbacks(new scanner_scan_callbacks()); 
 
-    p_scanner->setActiveScan(true); // Active scan gathers more data (like names) but uses more power
-    p_scanner->setInterval(100);
-    p_scanner->setWindow(99);
+    // '0' means scan forever, 'false' means non-blocking
+    p_scanner->setActiveScan(true);
+    p_scanner->start(0, false);
 }
 
-//attempts to connect to the server given the myDevice
-void connect_to_server(BLEAdvertisedDevice* target_device){
+//atempts to connect to the server  
+void connect_to_server(NimBLEAdvertisedDevice* target_device){
     Serial.println("Forming a connection to the target device...");
-    BLEClient* p_connector = BLEDevice::createClient();
-    if(p_connector->connect(target_device)) { // Connect to the remote BLE Servers
-        Serial.println("Connected to the target device!");
+
+    // 1. Create the client
+    NimBLEClient* p_connector = NimBLEDevice::createClient();
+    p_connector->setClientCallbacks(new client_callbacks(), false); // connect the callbacks tot he client
+
+    if(p_connector->connect(target_device)) { 
+        Serial.println("Connected to the target device! ✅");
     } else {
-        Serial.println("Failed to connect to the target device.");
-        found_device = false; // reset found device so it can try to find and connect again
+        Serial.println("Failed to connect. Retrying next scan cycle... ❌");
+        found_device = false; 
+        NimBLEDevice::getScan()->start(0, false);
     }
 }
 
-// an functiont that should be repeatdely ran to check for switching between advertising and scanning mode every few seconds, this is to ensure that both devices can find each other and connect even if they start up at different times, or if the connection drops and they need to find each other again
-void check_dual_mode(){
-    if (!found_device && millis() - lastSwitchTime >= nextInterval) {
-        // 1. Reset the timer
-        lastSwitchTime = millis();
-        
-        // 2. Pick a new random interval for the NEXT switch (e.g., 2-5 seconds)
-        nextInterval = 2000 + random(0, 3000); 
-        
-        // scanner mode
-        if (current_state == 1 || current_state == 0) { // if currently scanning or idle, switch to advertising
-            Serial.println("Current Mode: SCANs/IDLE, Switching to ADVERTISING");
-            p_scanner->stop(); // stop scanning so it can start advertising without issues
-            p_scanner->clearResults(); // clear results to reset found devices so it can find again in the future if needed
-            send_advertising_signal();
-            current_state = 2;
-        } elif (current_state == 2 && p_advertise->isAdvertising()){ // if currently advertising, switch to scanning
-            Serial.println("Current Mode: ADVERTISING, Switching to SCANNING");
-            stop_advertising_signal();
-            // Logging
-            Serial.println("Starting scanner...");
-            p_scanner->start(2, false);
-            Serial.println("Scanner started!");
+// performs the handshake by reading the nonce, computing the response, and writing it back to the server
+void perform_handshake(){
+    // Step 1: read nonce from server
+    std::string value = target_auth_characteristic->readValue();
+    if (value.length() < 1) return;
 
-            current_state = 1;
-        }
-        Serial.print("Next switch in: ");
-        Serial.println(nextInterval);
-    } 
+    uint8_t nonce = (uint8_t)value[0]; // process info to correct data type = unsigned 8 int 
+    Serial.print("Nonce received: ");
+    Serial.println(nonce);
+
+    // Step 2: compute response
+    uint8_t response = nonce ^ SECRET;
+
+    target_auth_characteristic->writeValue(&response, 1, true);
+    Serial.print("Response sent: ");
+    Serial.println(response);
+
+    //send_data_to_server("Hello!");
+        need_handshake = false; // reset handshake state so it doesnt keep trying to perform handshake
+
+    return;
 }

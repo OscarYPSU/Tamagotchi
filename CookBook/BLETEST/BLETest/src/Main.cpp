@@ -33,16 +33,20 @@ void setup() {
     // BLE SETUP for advertiser mode
     // -----------
     setup_advertising_mode();
-    setup_scanning_mode();
-    delay(1000); // small delay to ensure everything is set up before starting the loop, can be adjusted or removed if not needed
-}
+    setup_scanning_mode();}
 
 void loop(){
     // ensure connection stays alive
     if (!MQTT_client.connected()) {
         connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, DEVICE_NAME_AWS);
-    } else {
-        check_dual_mode();
-    }
+    } 
     MQTT_client.loop(); // checks for incoming messages and keeps the connection alive, this should be called regularly in the main loop
+
+    if (found_device && !connected) {
+        connect_to_server(target_device);
+    }
+
+    if (need_handshake && connected) {
+        perform_handshake();
+    }
 }
