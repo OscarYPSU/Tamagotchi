@@ -182,6 +182,7 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
 
   MQTT_client.setServer(AWS_ENDPOINT, 8883); // AWS IoT Core MQTT port
   MQTT_client.setCallback(receive_response_from_AWS); // set the callback function to handle incoming messages
+  MQTT_client.setBufferSize(512); // increase buffer size to handle larger messages from AWS Lambda/OpenAI
 
   Serial.println("Connecting to AWS IoT...");
   while (!MQTT_client.connected()) {
@@ -205,9 +206,8 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
 
 void send_message_to_aws(const String& message, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
   if (MQTT_client.connected()) {
-    
-
     Serial.println("Publishing message to AWS IoT Core... at topic: " + String(MQTT_TOPIC_PUB));
+    
     String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
     MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
     Serial.println("Published to MQTT IOT CORE: " + msg);
@@ -233,7 +233,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     // 3. Extract just the "message" value
     const char* message_text = data_from_aws["message"];
     // Wrap the char* in std::string() to convert it
-    std::string message_text_string_form = std::string(message_text);
+    String message_text_string_form = String(message_text);
 
     if (message_text) {
       Serial.println("--- OpenAI Message ---");
@@ -242,7 +242,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     }
 
     // forwards the response to the other device
-    send_message_to_connected_device(message_text_string_form); 
+    master_send_data(message_text_string_form); 
   }
 }
 

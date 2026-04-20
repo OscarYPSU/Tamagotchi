@@ -14,10 +14,8 @@ NimBLEAdvertising *p_advertise;
 NimBLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
 unsigned long lastSwitchTime = 0;
 unsigned long nextInterval = 3000; // Start with 3 seconds
-// (0 = idle, 1 = scanning, 2 = advertiser)
-char current_state = 0; // variable to keep track of the current state of the device, can be used for more complex interactions in the future
 NimBLEAdvertisedDevice* target_device; // Swapped to NimBLE
-
+int current_state; // 0 for being advertiser/server, 1 for being scanner/client
 
 // -----------
 // BLE SETUP for advertiser mode
@@ -63,23 +61,34 @@ void setup_advertising_mode(){
 }   
 
 
+bool have_message_from_connector = false; // flag to indicate if we have received a message from the connected device that we want to forward to AWS
+String message_from_connector; // variable to store the message we want to forward to AWS
+
 // determines what happens data is received from connected devices
 void advertiser_interaction_callbacks::onWrite(NimBLECharacteristic *self_characteristic) {
       if (allowed_connection){
         std::string value = self_characteristic->getValue();
         Serial.print("Received value: ");
         Serial.println(value.c_str());
+        
+        message_from_connector = String(value.c_str()); // store the message in a global variable so we can forward it to AWS in the main loop, we do this because we cannot call send_message_to_aws directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
+        have_message_from_connector = true; // set the flag to indicate we have a message to forward to AWS
 
         // sends message to AWS IOT CORE to then be processed by Lambda and ChatGPT
-        send_message_to_aws(String(value.c_str()), CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); 
+        // send_message_to_aws(String(value.c_str()), CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); we are moving this to main loop to handle for the implemenatio of a delay logic
       }
 };
 
 // Updated signature with ble_gap_conn_desc* desc
 void advertiser_system_call_backs::onConnect(NimBLEServer* self, ble_gap_conn_desc* desc) {
-    Serial.println("Device attempting to connect, sending authentication challenge!");      
+    Serial.println("Device attempting to connect, setting state as the server/advertiser, sending authentication challenge!");      
     connected = true; // we are now connected, but not necessarily authenticated yet, we will use this variable to keep track of the connection state and avoid multiple connections at onceq
+    current_state = 0; // we are now a server/advertiser, we will use this variable to keep track of the state of the device and avoid multiple connections at once and also to know when to perform certain actions that are specific to being a client vs being a server/advertiser
 
+    // stop scanmning and advertising since we are now connected to a device, we will restart advertising if the device disconnects
+    p_advertise->stop(); // stop advertising since we are now connected to a device, we will restart advertising if the device disconnects
+    p_scanner->stop(); // stop scanning since we are now connected to a device, we will restart scanning if the device disconnects
+    
     // Generate a new random nonce
     nonce = random(1, 255);
     // Write it to the auth characteristic
@@ -92,7 +101,8 @@ void advertiser_system_call_backs::onDisconnect(NimBLEServer* self) {
     Serial.println("Device disconnected... 🔌");
     connected = false; // reset connection state
     allowed_connection = false;  // reset auth
-    NimBLEDevice::getAdvertising()->start(); // restart advertising so other devices can find and connect to us
+    p_advertise->start(); // restart advertising so other devices can find and connect to us
+    p_scanner->start(2, false); // restart scanning so we can find other devices while waiting for a new connection, we will stop scanning again when a device connects
     Serial.println("Resumed advertising... 📢");
 };
 
@@ -137,15 +147,20 @@ NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server
 void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify) {
     std::string value((char*)data, length);
     Serial.println("Received from Advertiser: " + String(value.c_str()));
+    send_message_to_aws(String(value.c_str()), CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); // forward the message we received from the advertiser to AWS IOT CORE to then be processed by Lambda and ChatGPT
+
 }
-
-
 // Handles events when WE connect to a remote device
 class client_callbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
-        Serial.println(">>> We connected to peer (We are Central/Client)");
+        Serial.println("setting state as a client");
         need_handshake = true; // we will perform the handshake in the main loop, we do this because we cannot call perform_handshake directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
         connected = true;
+        current_state = 1; // we are now a client, we will use this variable to keep track of the state of the device and avoid multiple connections at once and also to know when to perform certain actions that are specific to being a client vs being a server/advertiser
+
+        // stop scanmning and advertising since we are now connected to a device, we will restart advertising if the device disconnects
+        p_advertise->stop(); // stop advertising since we are now connected to a device
+        p_scanner->stop(); // stop scanning since we are now connected to a device
 
         // After connecting, we need to find the correct characteristic for authentication
         NimBLERemoteService* target_remote_service = pClient->getService("4fafc201-1fb5-459e-8fcc-c5c9c331914b"); // grab the service that we know has the authentication characteristic on it, we need to do this because we cannot directly grab the characteristic without first grabbing the service it is on, and we also want to verify that the service exists before trying to grab the characteristic
@@ -170,7 +185,10 @@ class client_callbacks : public NimBLEClientCallbacks {
         Serial.println(">>> Client disconnected. Resuming scan...");
         connected = false; 
         need_handshake = false; // reset handshake state
-        NimBLEDevice::getScan()->start(0, false);
+
+        // restart scanning and advertising so we can find other devices while waiting for a new connection, we will stop scanning again when a device connects
+        p_scanner->start(2, false);
+        p_advertise->start();
     }
 };
 
@@ -196,7 +214,6 @@ void scanner_scan_callbacks::onResult(NimBLEAdvertisedDevice* advertisedDevice) 
             if (NimBLEDevice::getAddress() > advertisedDevice->getAddress()) {
                 Serial.println("I have the higher MAC. I will initiate the connection!");
                 found_device = true;
-                NimBLEDevice::getScan()->stop();
                 target_device = advertisedDevice; // store the target device so we can connect to it in the main loop, we do this because we cannot call connect directly from this callback function
             } else {
                 Serial.println("I have the lower MAC. I will stay in 'Server mode' and wait for them.");
@@ -254,11 +271,34 @@ void perform_handshake(){
     Serial.print("Response sent: ");
     Serial.println(response);
 
-    send_data_to_server("Hello!"); // simple test for sending data
+    String test_response = "Hello!";
+    master_send_data(test_response); // simple test for sending data
     need_handshake = false; // reset handshake state so it doesnt keep trying to perform handshake
 }
 
-void send_data_to_server(String message){
-    target_characterstic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
-    Serial.println("Sent: " + message);
+void send_data_to_server(String& message){
+    if (connected){
+        target_characterstic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+        Serial.println("Sent: " + message);
+    }
+}
+
+
+
+// ------------
+// MASTER functions
+// -----------
+
+void master_send_data(String& message){
+    if (connected){
+        if (current_state == 0) { // if we are a server/advertiser, we send the data to the connected client'
+            // formats the message appropately and sends it to the connected client using the characteristic
+            std::string formated_message = std::string(message.c_str()); // convert the String message to std::string so we can send it using the characteristic
+            send_message_to_connected_device(formated_message);
+        } else if (current_state == 1) { // if we are a client, we send the data to the server
+            send_data_to_server(message);
+        } else {
+            Serial.println("Error: Invalid state. Cannot send data.");
+        }
+    }
 }

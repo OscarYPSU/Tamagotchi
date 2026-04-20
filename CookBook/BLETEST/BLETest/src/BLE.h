@@ -25,10 +25,11 @@ extern NimBLERemoteCharacteristic  *target_characterstic; // for sending data to
 // State variables
 extern bool found_device; 
 extern bool connected;
+extern bool have_message_from_connector;
 extern bool need_handshake;
 extern unsigned long nextInterval; 
-extern char current_state; 
-
+extern String message_from_connector;
+extern int current_state; // 0 for being advertiser/server, 1 for being scanner/client
 
 // SCANNER
 class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
@@ -61,8 +62,9 @@ class advertiser_authentication_callbacks : public NimBLECharacteristicCallbacks
 void stop_advertising_signal();
 void send_advertising_signal();
 void setup_advertising_mode();
-void send_data_to_server(String message);
+void send_data_to_server(std::string message);
 void send_message_to_connected_device(std::string& message);
 void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify);
 
+void master_send_data(String& message);
 #endif
