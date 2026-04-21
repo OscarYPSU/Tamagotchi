@@ -17,6 +17,10 @@ unsigned long nextInterval = 3000; // Start with 3 seconds
 NimBLEAdvertisedDevice* target_device; // Swapped to NimBLE
 int current_state; // 0 for being advertiser/server, 1 for being scanner/client
 
+// state variables
+bool has_setup_adveriser_mode = false;
+bool has_setup_scanning_mode = false;
+
 // -----------
 // BLE SETUP for advertiser mode
 // -----------
@@ -58,6 +62,7 @@ void setup_advertising_mode(){
 
     p_advertise->start();
     Serial.println("Started advertising...");
+    has_setup_adveriser_mode = true;
 }   
 
 
@@ -147,7 +152,7 @@ NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server
 void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify) {
     std::string value((char*)data, length);
     Serial.println("Received from Advertiser: " + String(value.c_str()));
-    send_message_to_aws(String(value.c_str()), CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); // forward the message we received from the advertiser to AWS IOT CORE to then be processed by Lambda and ChatGPT
+    send_message_to_aws(String(value.c_str()), CUR_DEVICE_PERSONALITY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); // forward the message we received from the advertiser to AWS IOT CORE to then be processed by Lambda and ChatGPT
 
 }
 // Handles events when WE connect to a remote device
@@ -235,6 +240,7 @@ void setup_scanning_mode(){
     p_scanner->setActiveScan(true);
     p_scanner->start(2, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
     Serial.println("Started scanning mode...");
+    has_setup_scanning_mode = true;
 }
 
 //atempts to connect to the server  

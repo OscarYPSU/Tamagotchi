@@ -30,6 +30,8 @@ extern bool need_handshake;
 extern unsigned long nextInterval; 
 extern String message_from_connector;
 extern int current_state; // 0 for being advertiser/server, 1 for being scanner/client
+extern bool has_setup_adveriser_mode;
+extern bool has_setup_scanning_mode;
 
 // SCANNER
 class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {

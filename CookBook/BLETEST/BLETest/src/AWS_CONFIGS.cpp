@@ -90,7 +90,8 @@ const char* DEVICE_1_PRIVATE_KEY = \
 
 const char* DEVICE_1_MQTT_TOPIC_PUB = "device/d1/input"; // endpoint for publishing data to openai for response generation
 const char* DEVICE_1_MQTT_TOPIC_SUB = "device/d1/output"; // receiving the openai response from aws 
-
+const char * DEVICE_1_MQTT_PERSONALITY_TOPIC_PUB = "setup_personality/device/d1/input"; // endpoint for publishing personality data to openai for response generation
+const char * DEVICE_1_MQTT_PERSONALITY_TOPIC_SUB = "setup_personality/device/d1/output"; // endpoint for receiving personality data from openai
 
 // ---------
 // DEVICE 2 CONFIGS
@@ -150,13 +151,20 @@ const char* DEVICE_2_PRIVATE_KEY = \
 
 const char* DEVICE_2_MQTT_TOPIC_PUB = "device/d2/input"; // endpoint for publishing data to openai for response generation
 const char* DEVICE_2_MQTT_TOPIC_SUB = "device/d2/output"; // receiving the openai response from aws 
+const char* DEVICE_2_MQTT_PERSONALITY_TOPIC_PUB = "setup_personality/device/d2/input"; // endpoint for publishing personality data to openai for response generation
+const char* DEVICE_2_MQTT_PERSONALITY_TOPIC_SUB = "setup_personality/device/d2/output"; // endpoint for receiving personality data from openai
+
 
 // Intializes Current Device configs pointers
 const char* CUR_DEVICE_CERT;
 const char* CUR_PRIVATE_KEY;
 const char* CUR_MQTT_TOPIC_PUB;
 const char* CUR_MQTT_TOPIC_SUB;
+const char* CUR_MQTT_PERSONALITY_TOPIC_PUB;
+const char* CUR_MQTT_PERSONALITY_TOPIC_SUB;
 const char* DEVICE_NAME_AWS; // for logging purposes to identify which device is which in the serial monitor
+String CUR_DEVICE_PERSONALITY;
+bool received_personality_from_aws = false; // flag to indicate if we have received the personality data from AWS yet
 
 WiFiClientSecure net;
 PubSubClient MQTT_client(net);
@@ -175,14 +183,14 @@ void connectWiFi() {
 }
 
 // connecting to AWS IOT CORE via MQTT
-void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB, const char* DEVICE_NAME_AWS) {
+void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQTT_TOPIC_SUB, const char* MQTT_PERSONALITY_TOPIC_SUB, const char* DEVICE_NAME_AWS) {
   net.setCACert(AWS_ROOT_CA);
   net.setCertificate(DEVICE_CERT);
   net.setPrivateKey(PRIVATE_KEY);
 
   MQTT_client.setServer(AWS_ENDPOINT, 8883); // AWS IoT Core MQTT port
   MQTT_client.setCallback(receive_response_from_AWS); // set the callback function to handle incoming messages
-  MQTT_client.setBufferSize(512); // increase buffer size to handle larger messages from AWS Lambda/OpenAI
+  MQTT_client.setBufferSize(1024); // increase buffer size to handle larger messages from AWS Lambda/OpenAI
 
   Serial.println("Connecting to AWS IoT...");
   while (!MQTT_client.connected()) {
@@ -190,11 +198,13 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
       // SUBSCRIBE HERE
       // The topic must match what your Lambda is publishing to
       MQTT_client.subscribe(MQTT_TOPIC_SUB); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
-      
+      MQTT_client.subscribe(MQTT_PERSONALITY_TOPIC_SUB); // subscribe to the personality topic
+
       // Logs 
       Serial.print("Device: ");
       Serial.println(DEVICE_NAME_AWS);
       Serial.println("Subscribed to OpenAI response topic at: " + String(MQTT_TOPIC_SUB));
+      Serial.println("Subscribed to personality topic at: " + String(MQTT_PERSONALITY_TOPIC_SUB));
       Serial.println("Connected to AWS IoT!");
     } else {
       Serial.print("Failed, rc=");
@@ -204,11 +214,22 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
   }
 }
 
-void send_message_to_aws(const String& message, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
+void set_up_personality(String& device_mac_id, const char* MQTT_PERSONALITY_TOPIC_SUB, const char* MQTT_PERSONALITY_TOPIC_PUB) {
+  if (MQTT_client.connected()) {
+    Serial.println("Publishing personality to AWS IoT Core... at topic: " + String(CUR_MQTT_PERSONALITY_TOPIC_PUB));
+    String data = "{\"device_id\":\"" + device_mac_id + "\", \"topic_response\":\"" + MQTT_PERSONALITY_TOPIC_SUB + "\"}";
+    MQTT_client.publish(MQTT_PERSONALITY_TOPIC_PUB, data.c_str());
+    Serial.println("Published to MQTT IOT CORE: " + data);
+  } else {
+    Serial.println("MQTT not connected, cannot publish");
+  }
+}
+
+void send_message_to_aws(const String& message, const String& personality_data, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
   if (MQTT_client.connected()) {
     Serial.println("Publishing message to AWS IoT Core... at topic: " + String(MQTT_TOPIC_PUB));
-    
-    String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
+
+    String msg = "{\"message\":\"" + message + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\", \"personality\":\"" + personality_data + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
     MQTT_client.publish(MQTT_TOPIC_PUB, msg.c_str());
     Serial.println("Published to MQTT IOT CORE: " + msg);
   } else {
@@ -230,19 +251,27 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     Serial.print("JSON parsing failed: ");
     Serial.println(error.f_str());
   } else {
-    // 3. Extract just the "message" value
-    const char* message_text = data_from_aws["message"];
-    // Wrap the char* in std::string() to convert it
-    String message_text_string_form = String(message_text);
+    if (String(topic) == String(CUR_MQTT_PERSONALITY_TOPIC_SUB)) {
+      Serial.print("Received personality data:");
+      const char* personality_data = data_from_aws["personality"];
+      Serial.println(personality_data);
+      CUR_DEVICE_PERSONALITY = String(personality_data); // set the global variable for the device personality to be used in response generation
+      received_personality_from_aws = true; // set the flag to indicate we have received the personality data from AWS, allowing other setup and loop to continue
+    } else{
+      // 3. Extract just the "message" value
+      const char* message_text = data_from_aws["message"];
+      // Wrap the char* in std::string() to convert it
+      String message_text_string_form = String(message_text);
 
-    if (message_text) {
-      Serial.println("--- OpenAI Message ---");
-      Serial.println(message_text);
-      Serial.println("-----------------------");
-    }
+      if (message_text) {
+        Serial.println("--- OpenAI Message ---");
+        Serial.println(message_text);
+        Serial.println("-----------------------");
+      }
 
-    // forwards the response to the other device
-    master_send_data(message_text_string_form); 
+      // forwards the response to the other device
+      master_send_data(message_text_string_form);
+    } 
   }
 }
 
