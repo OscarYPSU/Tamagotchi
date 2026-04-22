@@ -35,15 +35,11 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
                 pBLEScan->stop(); // stop scanning
             }
         }
-
       }
-
     }
 };
 
 void setup() {
-
-  
   Serial.begin(115200);
   Serial.println("Scanning for BLE devices...");
 

@@ -20,6 +20,7 @@ int current_state; // 0 for being advertiser/server, 1 for being scanner/client
 // state variables
 bool has_setup_adveriser_mode = false;
 bool has_setup_scanning_mode = false;
+bool disonnected_from_client = false; // flag to indicate if we have been disconnected from a client, used to trigger restarting advertising and scanning
 
 // -----------
 // BLE SETUP for advertiser mode
@@ -65,6 +66,16 @@ void setup_advertising_mode(){
     has_setup_adveriser_mode = true;
 }   
 
+// to be called if advertising mode is set up but needs to start advertising again
+void start_advertising() {
+    if (p_advertise != nullptr) {
+        p_advertise->start();
+        Serial.println("Started advertising...");
+    } else {
+        Serial.println("Error: Advertiser not initialized.");
+    }
+}
+
 
 bool have_message_from_connector = false; // flag to indicate if we have received a message from the connected device that we want to forward to AWS
 String message_from_connector; // variable to store the message we want to forward to AWS
@@ -106,9 +117,10 @@ void advertiser_system_call_backs::onDisconnect(NimBLEServer* self) {
     Serial.println("Device disconnected... 🔌");
     connected = false; // reset connection state
     allowed_connection = false;  // reset auth
-    p_advertise->start(); // restart advertising so other devices can find and connect to us
-    p_scanner->start(2, false); // restart scanning so we can find other devices while waiting for a new connection, we will stop scanning again when a device connects
-    Serial.println("Resumed advertising... 📢");
+    found_device = false; // reset found device state so we can find and connect to devices again
+    have_message_from_connector = false; // reset message flag
+    message_from_connector = ""; // reset message variable
+    disonnected_from_client = true; // set flag to indicate we have been disconnected from a client
 };
 
 
@@ -190,10 +202,8 @@ class client_callbacks : public NimBLEClientCallbacks {
         Serial.println(">>> Client disconnected. Resuming scan...");
         connected = false; 
         need_handshake = false; // reset handshake state
-
-        // restart scanning and advertising so we can find other devices while waiting for a new connection, we will stop scanning again when a device connects
-        p_scanner->start(2, false);
-        p_advertise->start();
+        found_device = false; // reset found device state so we can find and connect to devices again
+        disonnected_from_client = true; // set flag to indicate we have been disconnected from a client
     }
 };
 
@@ -241,6 +251,16 @@ void setup_scanning_mode(){
     p_scanner->start(2, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
     Serial.println("Started scanning mode...");
     has_setup_scanning_mode = true;
+}
+
+// to be called if scanning mode is set up but needs to start scanning again
+void start_scanning(){
+    if (p_scanner != nullptr) {
+        p_scanner->start(2, false);
+        Serial.println("Started scanning mode...");
+    } else {
+        Serial.println("Error: Scanner not initialized.");
+    }
 }
 
 //atempts to connect to the server  

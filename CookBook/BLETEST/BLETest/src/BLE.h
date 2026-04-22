@@ -32,6 +32,7 @@ extern String message_from_connector;
 extern int current_state; // 0 for being advertiser/server, 1 for being scanner/client
 extern bool has_setup_adveriser_mode;
 extern bool has_setup_scanning_mode;
+extern bool disonnected_from_client; // flag to indicate if we have been disconnected from a client, used to trigger restarting advertising and scanning
 
 // SCANNER
 class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
@@ -41,6 +42,7 @@ class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
 
 void connect_to_server(NimBLEAdvertisedDevice* device);
 void setup_scanning_mode();
+void start_scanning();
 void perform_handshake();
 
 // ADVERTISER
@@ -61,8 +63,7 @@ class advertiser_authentication_callbacks : public NimBLECharacteristicCallbacks
         void onWrite(NimBLECharacteristic *pCharacteristic) override;
 };
 
-void stop_advertising_signal();
-void send_advertising_signal();
+void start_advertising();
 void setup_advertising_mode();
 void send_data_to_server(std::string message);
 void send_message_to_connected_device(std::string& message);
