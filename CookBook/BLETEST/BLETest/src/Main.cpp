@@ -42,7 +42,7 @@ unsigned long last_message_time = 0; // keeping track of the last time we proces
 void loop(){
 
     static unsigned long last_loop_heartbeat = 0;
-    const unsigned long LOOP_HEARTBEAT_INTERVAL = 5000;
+    const unsigned long LOOP_HEARTBEAT_INTERVAL = 10000;
 
     if (millis() - last_loop_heartbeat >= LOOP_HEARTBEAT_INTERVAL) {
         last_loop_heartbeat = millis();
@@ -75,6 +75,10 @@ void loop(){
 
     if (need_handshake && connected && received_personality_from_aws) { // for now we need the check from receiving personality because perform hadnshake sends message to aws openai lambda for now for tesing
         perform_handshake(); 
+    }
+
+    if(need_web_or_mcu_identification && connected && received_personality_from_aws){ // after handshake is complete, we need to identify if the connected device is a web client or an MCU so we set this flag to trigger the identification process in the main loop
+        notifiy_for_web_or_mcu(); 
     }
 
     if (have_message_from_connector) {

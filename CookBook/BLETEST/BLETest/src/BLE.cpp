@@ -8,15 +8,15 @@ bool allowed_connection = false; // only true after handshake that allows connec
 uint8_t nonce; // random nonce for authentication
 std::string DEVICE_NAME; // specific device name to initilize BLE with, can be used for scanning purposes to identify which device is which
 
-NimBLECharacteristic *p_advertiser_characteristic;
+NimBLECharacteristic *p_advertiser_characteristic; // for sesnding data across connected devic
 NimBLECharacteristic *p_advertiser_auth_characteristic; // for authentication process
+NimBLECharacteristic *p_web_or_mcu_characterstic; // for communication with web or MCU
+
 NimBLEAdvertising *p_advertise;
 NimBLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
-unsigned long lastSwitchTime = 0;
-unsigned long nextInterval = 3000; // Start with 3 seconds
-NimBLEAdvertisedDevice* target_device; // Swapped to NimBLE
+NimBLEAdvertisedDevice* target_device; 
 int current_state; // 0 for being advertiser/server, 1 for being scanner/client
-
+long advertiser_scanner_interval = 2; // start at 2 when no connection is made then increase to 10 after connection is made to allow for faster communication between connected devices
 // state variables
 bool has_setup_adveriser_mode = false;
 bool has_setup_scanning_mode = false;
@@ -47,11 +47,16 @@ void setup_advertising_mode(){
         "aeb5483e-36e1-4688-b7f5-ea07361b26a8", // auth UUID
         NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
     );
+    p_web_or_mcu_characterstic = p_advertiser_service->createCharacteristic(
+        "beb5483e-36e1-4688-b7f5-ea07361b26a9", // web/MCU communication UUID
+        NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
+    );
 
     // Link our Callback class to the characteristic
     p_advertiser->setCallbacks(new advertiser_system_call_backs());
     p_advertiser_characteristic->setCallbacks(new advertiser_interaction_callbacks());
     p_advertiser_auth_characteristic->setCallbacks(new advertiser_authentication_callbacks()); // attach the authenication behavioral code to the characterstics
+    p_web_or_mcu_characterstic->setCallbacks(new advertiser_web_or_mcu_callbacks()); // attach the web/MCU behavioral code to the characterstics
 
     p_advertiser_service->start(); // Finish creating the service
     
@@ -123,7 +128,7 @@ void advertiser_system_call_backs::onDisconnect(NimBLEServer* self) {
     disonnected_from_client = true; // set flag to indicate we have been disconnected from a client
 };
 
-
+bool need_web_or_mcu_identification = false; // flag to indicate if we need to identify as web or MCU
 // advertiser authentication callback to verify that the connected device is of own devices
 void advertiser_authentication_callbacks::onWrite(NimBLECharacteristic *self_characteristic) {
     std::string value = self_characteristic->getValue();
@@ -131,10 +136,31 @@ void advertiser_authentication_callbacks::onWrite(NimBLECharacteristic *self_cha
     uint8_t response = (uint8_t)value[0]; // process value into response data form (unsigned int 8)
     if (response == (nonce ^ SECRET)) {  // ✅ verify XOR  authentication
         allowed_connection = true;
-        Serial.println("Handshake success ✅");
+        need_web_or_mcu_identification = true; // after handshake is complete, we need to identify if the connected device is a web client or an MCU so we set this flag to trigger the identification process in the main loop
+        Serial.println("Handshake success ✅, sending notification to connected device to identify as web or MCU...");
     } else {
         allowed_connection = false;
         Serial.println("Handshake failed ❌");
+    }
+};
+
+int web_or_mcu; // 0 for web, 1 for MCU
+void advertiser_web_or_mcu_callbacks::onWrite(NimBLECharacteristic *self_characteristic) { // differentiate between mcu or web as connected device
+    if (allowed_connection){
+        std::string value = self_characteristic->getValue();
+        Serial.print("Received value on web/MCU characteristic: ");
+        Serial.println(value.c_str());
+        if (value == "0") {
+            web_or_mcu = 0;
+            Serial.println("Connected device identified as Web.");
+        } else if (value == "1") {
+            web_or_mcu = 1;
+            Serial.println("Connected device identified as MCU.");
+        } else {
+            Serial.println("Received unrecognized value on web/MCU characteristic.");
+        }
+    } else {
+        Serial.println("Received write on web/MCU characteristic but handshake not complete, ignoring...");
     }
 };
 
@@ -148,6 +174,17 @@ void send_message_to_connected_device(std::string& message) {
     }
 }
 
+void notifiy_for_web_or_mcu(){
+    if (connected && allowed_connection) {
+        p_web_or_mcu_characterstic->setValue("need to know if web or mcu"); 
+        p_web_or_mcu_characterstic->notify(); // notify the connected client that the value has changed so it can read it
+        need_web_or_mcu_identification = false; // reset the flag so we don't keep trying to identify as web or mcu
+        Serial.println("Notified connected device to identify as web or MCU.");
+    } else {
+        Serial.println("Cannot notify connected device to identify as web or MCU, no device connected or handshake not complete.");
+    }
+}
+
 // ------------
 // BLE scanning and connecting to other device as a client
 // ------------
@@ -157,6 +194,7 @@ bool connected = false;
 bool need_handshake = false;
 NimBLERemoteCharacteristic  *target_auth_characteristic; // for authentication process
 NimBLERemoteCharacteristic  *target_characterstic; // for sending data to server after handshake is complete, we store it here after we discover it in the onConnect callback of the client so we can use it later in the main loop to send data to the server after the handshake is complete
+NimBLERemoteCharacteristic  *target_web_or_mcu_characterstic; // for differentiating between web and MCU clients
 
 // --- CLIENT CALLBACKS ---
 
@@ -165,8 +203,12 @@ void notify_call_backs(BLERemoteCharacteristic* target_characterstic, uint8_t* d
     std::string value((char*)data, length);
     Serial.println("Received from Advertiser: " + String(value.c_str()));
     send_message_to_aws(String(value.c_str()), CUR_DEVICE_PERSONALITY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); // forward the message we received from the advertiser to AWS IOT CORE to then be processed by Lambda and ChatGPT
-
 }
+
+void notify_call_backs_web_or_mcu(BLERemoteCharacteristic* target_characterstic, uint8_t* data, size_t length, bool is_notify) {
+    authenticate_as_mcu(); // after handshake is complete, we notify the connected device to identify as web or MCU, we do this because we cannot call this directly from the onConnect callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after the onConnect callback is called.
+}
+
 // Handles events when WE connect to a remote device
 class client_callbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
@@ -184,11 +226,13 @@ class client_callbacks : public NimBLEClientCallbacks {
         if (target_remote_service) {
             target_auth_characteristic = target_remote_service->getCharacteristic("aeb5483e-36e1-4688-b7f5-ea07361b26a8"); // grab the authentication characteristic so we can perform the handshake in the main loop, we do this because we cannot call perform_handshake directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
             target_characterstic = target_remote_service->getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a8"); // also grab the data characteristic so we can use it later to send data to the server after handshake is complete
-            if (target_auth_characteristic && target_characterstic) {
-                if(target_characterstic->canNotify()) {
+            target_web_or_mcu_characterstic = target_remote_service->getCharacteristic("beb5483e-36e1-4688-b7f5-ea07361b26a9"); // also grab the web/MCU communication characteristic so we can use it later to differentiate between a web client and an MCU as the connected device
+            if (target_auth_characteristic && target_characterstic && target_web_or_mcu_characterstic) {
+                if(target_characterstic->canNotify() && target_web_or_mcu_characterstic->canNotify()) {
                     target_characterstic->subscribe(true, notify_call_backs); // subscribe to the  characteristic to receive messages  when the server sends us the messages after handshake is complete, we do this because we cannot call notify_call_backs directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.  
+                    target_web_or_mcu_characterstic->subscribe(true, notify_call_backs_web_or_mcu); // subscribe to the web/MCU characteristic to receive the notification to identify as web or MCU, we do this because we cannot call notify_call_backs_web_or_mcu directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
                 }
-                Serial.println("Found authentication and sending data characteristic! Ready to perform handshake.");
+                Serial.println("Found authentication and sending and web/MCU data characteristic! Ready to perform handshake.");
             } else {
                 Serial.println("Failed to find one or both characteristics. Disconnecting...");
                 pClient->disconnect();
@@ -248,7 +292,7 @@ void setup_scanning_mode(){
 
     // '2' means scan for 2 seconds, 'false' means non-blocking
     p_scanner->setActiveScan(true);
-    p_scanner->start(2, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
+    p_scanner->start(advertiser_scanner_interval, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
     Serial.println("Started scanning mode...");
     has_setup_scanning_mode = true;
 }
@@ -256,7 +300,7 @@ void setup_scanning_mode(){
 // to be called if scanning mode is set up but needs to start scanning again
 void start_scanning(){
     if (p_scanner != nullptr) {
-        p_scanner->start(2, false);
+        p_scanner->start(advertiser_scanner_interval, false);
         Serial.println("Started scanning mode...");
     } else {
         Serial.println("Error: Scanner not initialized.");
@@ -276,11 +320,11 @@ void connect_to_server(NimBLEAdvertisedDevice* target_device){
     } else {
         Serial.println("Failed to connect. Retrying next scan cycle... ❌");
         found_device = false; 
-        NimBLEDevice::getScan()->start(0, false);
+        p_scanner->start(advertiser_scanner_interval, false);
     }
 }
 
-// performs the handshake by reading the nonce, computing the response, and writing it back to the server
+// performs the handshake writing it back to the server
 void perform_handshake(){
     // Step 1: read nonce from server
     std::string value = target_auth_characteristic->readValue();
@@ -293,19 +337,31 @@ void perform_handshake(){
     // Step 2: compute response
     uint8_t response = nonce ^ SECRET;
 
-    target_auth_characteristic->writeValue(&response, 1, true);
+    target_auth_characteristic->writeValue(&response, 1,false);
     Serial.print("Response sent: ");
     Serial.println(response);
 
-    String test_response = "Hello!";
-    master_send_data(test_response); // simple test for sending data
     need_handshake = false; // reset handshake state so it doesnt keep trying to perform handshake
+}
+
+void authenticate_as_mcu(){
+    if(need_handshake == false && target_web_or_mcu_characterstic != nullptr){
+        Serial.println("Authenticating as MCUs to the advertiser...");
+        String mcu_identifier = "1"; // let's say "1" means MCU and "0" means web client, we will send this after the handshake so the advertiser can differentiate between a web client and an MCU
+        target_web_or_mcu_characterstic->writeValue((uint8_t*)mcu_identifier.c_str(), mcu_identifier.length(), false); // write the identifier to the web/MCU characteristic so the advertiser can differentiate between a web client and an MCU
+        Serial.println("Sent MCU identification to advertiser.");
+
+        String test_response = "Hello!";
+        master_send_data(test_response); // simple test for sending data
+    }
 }
 
 void send_data_to_server(String& message){
     if (connected){
-        target_characterstic->writeValue((uint8_t*)message.c_str(), message.length(), true);     
+        target_characterstic->writeValue((uint8_t*)message.c_str(), message.length(), false);     
         Serial.println("Sent: " + message);
+    } else {
+        Serial.println("Cannot send message, no device connected.");
     }
 }
 
