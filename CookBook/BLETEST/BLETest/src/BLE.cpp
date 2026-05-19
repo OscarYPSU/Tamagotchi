@@ -65,12 +65,13 @@ void setup_advertising_mode(){
     // create and attach the data to attatch to advertising data
     p_advertise->setManufacturerData(manufacture_data); // NimBLE handles this directly on the advertiser object usually
     p_advertise->setScanResponse(true); 
+    p_advertise->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 
     p_advertise->start();
     Serial.println("Started advertising...");
     has_setup_adveriser_mode = true;
 }   
-
+ 
 // to be called if advertising mode is set up but needs to start advertising again
 void start_advertising() {
     if (p_advertise != nullptr) {

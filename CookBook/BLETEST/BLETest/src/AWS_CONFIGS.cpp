@@ -4,8 +4,8 @@
 // -----------------
 // WIFI CONFIGS
 // -----------------
-const char* WIFI_SSID = "psu-personal";
-// const char* WIFI_PASSWORD = "9172913763";  dont need since im using school wifi that doesnt require password
+const char* WIFI_SSID = "Verizon_yang";
+const char* WIFI_PASSWORD = "9172913763";  // dont need since im using school wifi that doesnt require password
 
 // AWS IOT configs
 const char* AWS_ENDPOINT = "abuwn28a3fsb9-ats.iot.us-east-2.amazonaws.com";
@@ -172,7 +172,7 @@ PubSubClient MQTT_client(net);
 // connecting to wifi
 void connectWiFi() {
   Serial.print("Connecting to WiFi");
-  WiFi.begin(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
