@@ -43,7 +43,7 @@ class scanner_scan_callbacks: public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) override;
 };
 
-void connect_to_server(NimBLEAdvertisedDevice* device);
+bool connect_to_server(NimBLEAdvertisedDevice* device);
 void setup_scanning_mode();
 void start_scanning();
 void perform_handshake();

@@ -225,6 +225,7 @@ void set_up_personality(String& device_mac_id, const char* MQTT_PERSONALITY_TOPI
   }
 }
 
+// sends message to aws for response generation, also includes the personality data in the message so that lambda can use it to generate a more personalized response
 void send_message_to_aws(const String& message, const String& personality_data, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
   if (MQTT_client.connected()) {
     Serial.println("Publishing message to AWS IoT Core... at topic: " + String(MQTT_TOPIC_PUB));
@@ -251,6 +252,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     Serial.print("JSON parsing failed: ");
     Serial.println(error.f_str());
   } else {
+    // if the topic is receiving personality data of device
     if (String(topic) == String(CUR_MQTT_PERSONALITY_TOPIC_SUB)) {
       Serial.print("Received personality data:");
       const char* personality_data = data_from_aws["personality"];
@@ -275,3 +277,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
   }
 }
 
+void check_for_registration(const String& device_mac_id){
+  
+
+}

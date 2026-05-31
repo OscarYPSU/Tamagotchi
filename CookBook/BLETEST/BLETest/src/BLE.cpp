@@ -15,7 +15,7 @@ NimBLECharacteristic *p_web_or_mcu_characterstic; // for communication with web 
 NimBLEAdvertising *p_advertise;
 NimBLEAdvertisementData advertising_data; // the advertising signal data so we can change and update it with information
 NimBLEAdvertisedDevice* target_device; 
-int current_state; // 0 for being advertiser/server, 1 for being scanner/client
+int current_state = 2; // 0 for being advertiser/server, 1 for being scanner/client, 2 not connected 
 long advertiser_scanner_interval = 2; // start at 2 when no connection is made then increase to 10 after connection is made to allow for faster communication between connected devices
 // state variables
 bool has_setup_adveriser_mode = false;
@@ -67,8 +67,7 @@ void setup_advertising_mode(){
     p_advertise->setScanResponse(true); 
     p_advertise->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 
-    p_advertise->start();
-    Serial.println("Started advertising...");
+    Serial.println("finished setting up advertising...");
     has_setup_adveriser_mode = true;
 }   
  
@@ -293,8 +292,7 @@ void setup_scanning_mode(){
 
     // '2' means scan for 2 seconds, 'false' means non-blocking
     p_scanner->setActiveScan(true);
-    p_scanner->start(advertiser_scanner_interval, false); // CANNOT SCAN FOR EVER OR IT WILL BE BLOCKING AND PREVENT OTHER CODE FROM RUNNING, MUST BE NON-BLOCKING AND STARTED IN THE MAIN LOOP AFTER THIS SETUP FUNCTION IS CALLED
-    Serial.println("Started scanning mode...");
+    Serial.println("finished setting up scanning mode...");
     has_setup_scanning_mode = true;
 }
 
@@ -309,7 +307,7 @@ void start_scanning(){
 }
 
 //atempts to connect to the server  
-void connect_to_server(NimBLEAdvertisedDevice* target_device){
+bool connect_to_server(NimBLEAdvertisedDevice* target_device){
     Serial.println("Forming a connection to the target device...");
 
     // 1. Create the client
@@ -318,11 +316,12 @@ void connect_to_server(NimBLEAdvertisedDevice* target_device){
 
     if(p_connector->connect(target_device)) { 
         Serial.println("Connected to the target device! ✅");
+        return true;
     } else {
         Serial.println("Failed to connect. Retrying next scan cycle... ❌");
         found_device = false; 
-        p_scanner->start(advertiser_scanner_interval, false);
     }
+    return false;
 }
 
 // performs the handshake writing it back to the server
@@ -365,7 +364,6 @@ void send_data_to_server(String& message){
         Serial.println("Cannot send message, no device connected.");
     }
 }
-
 
 
 // ------------
