@@ -1,24 +1,6 @@
 #include "AWS_CONFIGS.h" // contains the device certs and private keys for both devices, as well as the mqtt topics for each device
 #include "BLE.h" // contains the BLE setup and callbacks for device interaction
-
-enum device_state {
-    CHECK_REGISTRATION, //  check for registration 
-    NEED_REGISTRATION, // registered with AWS DynamDB via user username and password
-
-    PERSONALITY_SET_UP, // getting personality etc
-    SETUP_BLE, // SET UP BLE
-    START_BLE, // if we get disconnected from a client or server, we need to restart the BLE setup to start advertising and scanning again to find and connect to devices again
-    SCANNING_AND_ADVERTISING, // currently scanning and advertising for other devices to connect to
-    FOUND_DEVICE, // found a device to connect to as a client
-    NEED_TO_AUTHENTICATE, // device is scanner need to perform handshake w advertiser device
-    NEED_AUTHENTICATION, // device is advertiser  waiting for handshake from scanner device
-    IDENTIFYING_AS_WEB_OR_MCU, // after handshake is complete, identified if connected device is web or MCU
-    NOTIFYING_FOR_WEB_OR_MCU, // notifies connecterd device to send if web or mcu device
-    ALL_READY, // ready to send and receive messages to and from connected device and AWS IOT CORE
-    DISCONNECTED // disconnected from connected device, either as a client or server, need to start over with advertising and scanning to find and connect to devices again
-};
-
-device_state DEVICE_STATE = PERSONALITY_SET_UP; // start at the beginning of the flow where the device needs to be registered with AWS DynamoDB to set up the personality and other information for the device that will be used in AWS Lambda when processing messages from the device and generating responses from ChatGPT, we will use this variable to keep track of where we are in the flow and what actions to perform in the main loop based on the current state of the device
+#include "device_state.h"
 
 // configs for appropiate device using MAC addrress for AWS IOT Core
 void setup() {
@@ -39,6 +21,8 @@ void setup() {
         CUR_MQTT_TOPIC_SUB = DEVICE_1_MQTT_TOPIC_SUB;
         CUR_MQTT_PERSONALITY_TOPIC_PUB = DEVICE_1_MQTT_PERSONALITY_TOPIC_PUB;
         CUR_MQTT_PERSONALITY_TOPIC_SUB = DEVICE_1_MQTT_PERSONALITY_TOPIC_SUB;
+        CUR_MQTT_DEVICE_INFO_TOPIC_PUB = DEVICE_1_MQTT_DEVICE_INFO_PUB;
+        CUR_MQTT_DEVICE_INFO_TOPIC_SUB = DEVICE_1_MQTT_DEVICE_INFO_SUB;
         DEVICE_NAME_AWS = "Device1";
         DEVICE_NAME = "ESP32-S3-Device1";
     } else {
@@ -48,6 +32,8 @@ void setup() {
         CUR_MQTT_TOPIC_SUB = DEVICE_2_MQTT_TOPIC_SUB;
         CUR_MQTT_PERSONALITY_TOPIC_PUB = DEVICE_2_MQTT_PERSONALITY_TOPIC_PUB;
         CUR_MQTT_PERSONALITY_TOPIC_SUB = DEVICE_2_MQTT_PERSONALITY_TOPIC_SUB;
+        CUR_MQTT_DEVICE_INFO_TOPIC_PUB = DEVICE_2_MQTT_DEVICE_INFO_PUB;
+        CUR_MQTT_DEVICE_INFO_TOPIC_SUB = DEVICE_2_MQTT_DEVICE_INFO_SUB;
         DEVICE_NAME_AWS = "Device2";
         DEVICE_NAME = "ESP32-S3-Device2";
     }
@@ -88,6 +74,12 @@ void loop(){
     }
 
     switch(DEVICE_STATE){
+        case CHECK_REGISTRATION:
+            Serial.println("Current state: CHECK_REGISTRATION");
+            check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device is registered in AWS DynamoDB by sending the device mac address as the primary ID, this will trigger a lambda function that checks if the device is registered and if it is, it will send back the personality data for the device to set up the personality of the device which will be used in response generation in AWS Lambda when processing messages from the device
+            DEVICE_STATE = WAITING_FOR_REGISTRATION;
+            Serial.println("Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
+            break;
         // setting up personality of mcu before setting up BLE
         case PERSONALITY_SET_UP:
             if(received_personality_from_aws){

@@ -2,6 +2,7 @@
 // BLE SET UP
 // ----------------
 #include "BLE.h"
+#include "device_state.h"
 #define SECRET 0x5A // secret for handshake protocl
 
 bool allowed_connection = false; // only true after handshake that allows connected device to start sending data

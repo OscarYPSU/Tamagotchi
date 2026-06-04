@@ -1,6 +1,7 @@
 #ifndef BLE_H
 #define BLE_H
 
+
 #include <Arduino.h>
 #include <NimBLEDevice.h> // Only one include needed
 #include "AWS_CONFIGS.h"

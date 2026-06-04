@@ -1,5 +1,5 @@
 #include "AWS_CONFIGS.h" // contains the device certs and private keys for both devices, as well as the mqtt topics for each device
-
+#include "device_state.h"
 
 // -----------------
 // WIFI CONFIGS
@@ -92,6 +92,8 @@ const char* DEVICE_1_MQTT_TOPIC_PUB = "device/d1/input"; // endpoint for publish
 const char* DEVICE_1_MQTT_TOPIC_SUB = "device/d1/output"; // receiving the openai response from aws 
 const char * DEVICE_1_MQTT_PERSONALITY_TOPIC_PUB = "setup_personality/device/d1/input"; // endpoint for publishing personality data to openai for response generation
 const char * DEVICE_1_MQTT_PERSONALITY_TOPIC_SUB = "setup_personality/device/d1/output"; // endpoint for receiving personality data from openai
+const char* DEVICE_1_MQTT_DEVICE_INFO_PUB = "device/info/d1/input"; // endpoint for publishing device info such as mac address to lambda so that it can be used in personality generation 
+const char* DEVICE_1_MQTT_DEVICE_INFO_SUB = "device/info/d1/output"; // endpoint for receiving device info from lambda
 
 // ---------
 // DEVICE 2 CONFIGS
@@ -153,6 +155,8 @@ const char* DEVICE_2_MQTT_TOPIC_PUB = "device/d2/input"; // endpoint for publish
 const char* DEVICE_2_MQTT_TOPIC_SUB = "device/d2/output"; // receiving the openai response from aws 
 const char* DEVICE_2_MQTT_PERSONALITY_TOPIC_PUB = "setup_personality/device/d2/input"; // endpoint for publishing personality data to openai for response generation
 const char* DEVICE_2_MQTT_PERSONALITY_TOPIC_SUB = "setup_personality/device/d2/output"; // endpoint for receiving personality data from openai
+const char* DEVICE_2_MQTT_DEVICE_INFO_PUB = "device/info/d2/input"; // endpoint for publishing device info such as mac address to lambda so that it can be used in personality generation 
+const char* DEVICE_2_MQTT_DEVICE_INFO_SUB = "device/info/d2/output"; // endpoint for receiving device info from lambda
 
 
 // Intializes Current Device configs pointers
@@ -162,6 +166,8 @@ const char* CUR_MQTT_TOPIC_PUB;
 const char* CUR_MQTT_TOPIC_SUB;
 const char* CUR_MQTT_PERSONALITY_TOPIC_PUB;
 const char* CUR_MQTT_PERSONALITY_TOPIC_SUB;
+const char* CUR_MQTT_DEVICE_INFO_TOPIC_PUB;
+const char* CUR_MQTT_DEVICE_INFO_TOPIC_SUB;
 const char* DEVICE_NAME_AWS; // for logging purposes to identify which device is which in the serial monitor
 String CUR_DEVICE_PERSONALITY;
 bool received_personality_from_aws = false; // flag to indicate if we have received the personality data from AWS yet
@@ -199,6 +205,7 @@ void connectAWS(const char* DEVICE_CERT, const char* PRIVATE_KEY, const char* MQ
       // The topic must match what your Lambda is publishing to
       MQTT_client.subscribe(MQTT_TOPIC_SUB); // subscribe to the topic where AWS Lambda will publish the ChatGPT response
       MQTT_client.subscribe(MQTT_PERSONALITY_TOPIC_SUB); // subscribe to the personality topic
+      MQTT_client.subscribe(CUR_MQTT_DEVICE_INFO_TOPIC_SUB); // subscribe to device info topic to receive registration status from lambda
 
       // Logs 
       Serial.print("Device: ");
@@ -259,7 +266,9 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
       Serial.println(personality_data);
       CUR_DEVICE_PERSONALITY = String(personality_data); // set the global variable for the device personality to be used in response generation
       received_personality_from_aws = true; // set the flag to indicate we have received the personality data from AWS, allowing other setup and loop to continue
-    } else{
+      
+      // if the topic is from openai functiopn
+    } else if (String(topic) == String(CUR_MQTT_TOPIC_SUB)) {
       // 3. Extract just the "message" value
       const char* message_text = data_from_aws["message"];
       // Wrap the char* in std::string() to convert it
@@ -273,11 +282,40 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
 
       // forwards the response to the other device
       master_send_data(message_text_string_form);
-    } 
+
+      // if response is from topic of getting device info
+    } else if(String(topic) == String(CUR_MQTT_DEVICE_INFO_TOPIC_SUB)) {
+      // extracts data from AWS, 0 for true, 1 for false for whether the device is registered or not
+      if(DEVICE_STATE == WAITING_FOR_REGISTRATION){ // checks if device is in current state
+        // extracting the status from data
+        int registration_status = data_from_aws["registration_status"];
+
+        // logging
+        Serial.print("Device registration status: ");
+        Serial.println(registration_status);
+        
+        if(registration_status == 1){ // not registered
+          // logging
+          Serial.println("Device not registered, please register your device to use the chatbot features");
+          DEVICE_STATE = NEED_REGISTRATION; // update the device state to not registered
+        } else { // registered
+          // logging
+          Serial.println("Device is registered, you can start using the chatbot features");
+          DEVICE_STATE = PERSONALITY_SET_UP; // update the device state to registered}
+        }
+      }
+    }
   }
 }
 
-void check_for_registration(const String& device_mac_id){
-  
-
+// checks if device is registered in AWS dynamoDB by sending device_mac_id as primary ID
+void check_for_registration(const String& device_mac_id, const char* MQTT_TOPIC_SUB, const char* MQTT_TOPIC_PUB) {
+  if (MQTT_client.connected()) {
+    Serial.println("Checking for device registration for device with MAC ID: " + device_mac_id + " by publishing to AWS IoT Core... at topic: " + String(MQTT_TOPIC_PUB));
+    String data = "{\"device_id\":\"" + device_mac_id + "\", \"topic_response\":\"" + MQTT_TOPIC_SUB + "\"}"; // packaging the message into a json format to be processed by lambda and then sent to openai
+    MQTT_client.publish(MQTT_TOPIC_PUB, data.c_str());
+    Serial.println("Published to MQTT IOT CORE: " + data);
+  } else {
+    Serial.println("MQTT not connected, cannot publish");
+  }
 }
