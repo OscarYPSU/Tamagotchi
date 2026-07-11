@@ -6,12 +6,13 @@
 #include "Main.h"
 
 const char* state_tag = "state"; // tag for logging the device state
+String device_mac = "";
+bool connected_to_aws = false; // flag to indicate if the device is connected to AWS IOT Core
 
 // configs for appropiate device using MAC address for AWS IOT Core
 void setup() {
     Serial.begin(115200); 
-    connectWiFi(); // connect to wifi first to get the mac address and then use it to determine which certs and keys to use for AWS IOT CORE connection
-    String device_mac = WiFi.macAddress();
+    device_mac = WiFi.macAddress();
     // prints out the mac address of the device for scanning purposes
     Serial.print("Device MAC Address: ");
     Serial.println(device_mac);
@@ -43,9 +44,9 @@ void setup() {
         DEVICE_NAME = "ESP32-S3-Device2";
     }
     // Now proceed to connectAWS() using these selected variables
-    connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
+    //connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
     // once connected, set up the personality of the device
-    set_up_personality(device_mac, CUR_MQTT_PERSONALITY_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_PUB);
+    //set_up_personality(device_mac, CUR_MQTT_PERSONALITY_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_PUB);
    
 };
 
@@ -66,7 +67,7 @@ void loop(){
     }
 
     // ensure connection stays alive
-    if (!MQTT_client.connected()) {
+    if (!MQTT_client.connected() && connected_to_aws == true) {
         connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
     } 
     MQTT_client.loop(); // checks for incoming messages and keeps the connection alive, this should be called regularly in the main loop
@@ -80,12 +81,12 @@ void loop(){
 
 
     switch(DEVICE_STATE){
-        case CHECK_REGISTRATION:
-            ESP_LOGI(state_tag, "Current state: CHECK_REGISTRATION");
+        case CHECK_WIFI_CREDS:
+            ESP_LOGI(state_tag, "Current state: CHECK_WIFI_CREDS");
 
             // checks for wifi credentials first (if saved in NVS)
-            WIFI_SSID = read_from_nvs("wifi_credentials", "ssid");
-            WIFI_PASSWORD = read_from_nvs("wifi_credentials", "password");
+            WIFI_SSID = read_from_nvs("wifi-creds", "ssid");
+            WIFI_PASSWORD = read_from_nvs("wifi-creds", "password");
 
             // if wifi credentials isnt already in NVS, then set device as AP point to grab the wifi credentials from users
             if(WIFI_SSID == "None" || WIFI_PASSWORD == "None"){
@@ -94,34 +95,70 @@ void loop(){
                 break;
             }
 
-            check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device has been registered with the aws, if it is, automatically switches state to PERSONALITY_SET_UP. If not it switches state to NEED_REGISTRATION TO START THE REGISTRATRATION MODE
-            DEVICE_STATE = WAITING_FOR_REGISTRATION;
-            ESP_LOGI(state_tag, "Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
+            DEVICE_STATE = CONNECTING_TO_WIFI; // connect to wifi with the found credentials
+            ESP_LOGI(state_tag, "Wifi credentails found, switching to state: CONNECTING_TO_WIFI");
+            // check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device has been registered with the aws, if it is, automatically switches state to PERSONALITY_SET_UP. If not it switches state to NEED_REGISTRATION TO START THE REGISTRATRATION MODE
+            // DEVICE_STATE = WAITING_FOR_REGISTRATION; // automatically handled in AWS handler
+            // ESP_LOGI(state_tag, "Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
             break;
         
+        // connect to wifi then connect to aws 
+        case CONNECTING_TO_WIFI:
+            ESP_LOGI(state_tag, "Current state: CONNECTING_TO_WIFI");
+            connectWiFi(); // connects to wifi using the credentials found in NVS
+            DEVICE_STATE = CONNECTING_TO_AWS; // after connecting to wifi, move to the next state to connect to AWS
+            ESP_LOGI(state_tag, "Connected to WiFi, switching to state: CONNECTING_TO_AWS");
+            break;
+
+        // connect to aws
+        case CONNECTING_TO_AWS:
+            ESP_LOGI(state_tag, "Current state: CONNECTING_TO_AWS");
+            connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
+            connected_to_aws = true; // set the flag to indicate we are connected to AWS IOT Core
+            set_up_personality(device_mac, CUR_MQTT_PERSONALITY_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_PUB);
+            DEVICE_STATE = WAITING_FOR_PERSONALITY; // automatically handled in AWS handler
+            ESP_LOGI(state_tag, "Connected to AWS, switching to state: WAITING_FOR_PERSONALITY");
+            break;
+
+        
+        case WAITING_FOR_PERSONALITY:
+            // waits for personality, automatically handled in AWS handler
+            break;
+
         // AP mode to grab wifi credentials and account details from user 
         case SETTING_AP_MODE:
             ESP_LOGI(state_tag, "Current state: SETTING_AP_MODE");
             setup_ap_mode(); // sets up the access point and web server to grab the wifi credentials and account details from the user
             start_ap_mode(); // starts the access point and web server to grab the wifi credentials and account details from the user
-            DEVICE_STATE = REGRISTRATION_MODE; // switch to the registration mode to wait for the user to input the wifi credentials and account details through the web server
-            ESP_LOGI(state_tag, "Switching to state: REGRISTRATION_MODE");
+            DEVICE_STATE = AP_MODE; // switch to the registration mode to wait for the user to input the wifi credentials and account details through the web server
+            ESP_LOGI(state_tag, "Switching to state: AP_MODE");
             break;
-        
-        case REGRISTRATION_MODE:
-            // waiting for the user to input the wifi credentials and account details through the web server
-            // no action here for the device, automatically handled when user gives an in put
+        case AP_MODE:
+            // waiting for the user to input the wifi credentials through the web server
+            // Handle access point specific logic here
+            // Keep the DNS and Web Server running
+            dns_server.processNextRequest();
+            web_server.handleClient();
+            break;
+        case CHECK_REGISTRATION:
+            ESP_LOGI(state_tag, "Current state: CHECK_REGISTRATION");
+            check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device has been registered with the aws, if it is, automatically switches state to PERSONALITY_SET_UP. If not it switches state to NEED_REGISTRATION TO START THE REGISTRATRATION MODE
+            DEVICE_STATE = WAITING_FOR_REGISTRATION; // automatically handled in AWS handler
+            ESP_LOGI(state_tag, "Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
+            break;
+
+        case WAITING_FOR_REGISTRATION:
+            // waiting for the device to be registered with the aws, automatically handled in AWS handler
             break;
 
         // setting up personality of mcu and also  before setting up BLE
         case SETTING_CONFIGURATION:
             if(received_personality_from_aws){
-                ESP_LOGI(state_tag, "Received personality data from AWS, proceeding to set up BLE...");
+                ESP_LOGI(state_tag, "Received all data from AWS, proceeding to set up BLE...");
                 DEVICE_STATE = SETUP_BLE; // move to the next state to start BLE setup
             } else {
                 ESP_LOGI(state_tag, "Waiting for personality data from AWS...");
             }
-
             break;
         //sets up BLE
         case SETUP_BLE:

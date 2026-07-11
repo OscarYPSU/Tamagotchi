@@ -43,6 +43,8 @@ void handle_form_submit(){
 
     // proceed to turn off acesspoint after getting these configs
     stop_ap_mode();
+    
+    DEVICE_STATE = CHECK_WIFI_CREDS; // switch state to check_registration to look for wifi credentials again
   } else {
     ESP_LOGE(ap_tag, "No wifi_name argument received");
     ESP_LOGE(ap_tag, "Expected POST parameter: wifi_name");
@@ -57,14 +59,14 @@ void stop_ap_mode(){
   WiFi.softAPdisconnect(true); // 3. Turn off the Access Point broadcasting
   WiFi.mode(WIFI_STA);         // 4. Switch Wi-Fi back to normal station mode
   ESP_LOGI(ap_tag, "AP mode stopped");
-  DEVICE_STATE = CHECK_REGISTRATION; // 5. Switch back to the CHECK_REGISTRATION state to check for wifi credentials and account details
+  DEVICE_STATE = CHECK_WIFI_CREDS; // 5. Switch back to the CHECK_WIFI_CREDS state to check for wifi credentials and account details
   return;
 }
 
 void start_ap_mode(){
     ESP_LOGI(ap_tag, "Starting AP mode");
-    dns_server.start(DNS_PORT, "*", apIP);
     web_server.begin();
+    dns_server.start(DNS_PORT, "*", apIP); // Start DNS Server redirecting ALL traffic (*) to the ESP32 IP
     ESP_LOGI(ap_tag, "AP mode started");
     return;
 }
@@ -84,8 +86,6 @@ void setup_ap_mode() {
     WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
     WiFi.softAP(ssid, password);
 
-    // Start DNS Server redirecting ALL traffic (*) to the ESP32 IP
-    dns_server.start(DNS_PORT, "*", apIP);
 
     // Web Server Routes
     web_server.on("/", handle_root); 

@@ -8,8 +8,8 @@ const char* aws_tag = "AWS";
 // -----------------
 // WIFI CONFIGS
 // -----------------
-String WIFI_SSID = "Verizon_yang";
-String WIFI_PASSWORD = "9172913763";  // dont need since im using school wifi that doesnt require password
+String WIFI_SSID = "";
+String WIFI_PASSWORD = "";  
 
 // AWS IOT configs
 const char* AWS_ENDPOINT = "abuwn28a3fsb9-ats.iot.us-east-2.amazonaws.com";
@@ -264,14 +264,13 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
     Serial.println(error.f_str());
   } else {
     // if the topic is receiving personality data of device
-    if (String(topic) == String(CUR_MQTT_PERSONALITY_TOPIC_SUB)) {
-      
-      Serial.print("Received personality data:");
+    if (String(topic) == String(CUR_MQTT_PERSONALITY_TOPIC_SUB) && DEVICE_STATE == WAITING_FOR_PERSONALITY) {
       const char* personality_data = data_from_aws["personality"];
-      Serial.println(personality_data);
+      ESP_LOGI(aws_tag, "Received personality data from AWS: %s", personality_data);
       CUR_DEVICE_PERSONALITY = String(personality_data); // set the global variable for the device personality to be used in response generation
       received_personality_from_aws = true; // set the flag to indicate we have received the personality data from AWS, allowing other setup and loop to continue
-      
+      DEVICE_STATE = CHECK_REGISTRATION; // update the device state to check for registration
+
       // if the topic is from openai functiopn
     } else if (String(topic) == String(CUR_MQTT_TOPIC_SUB)) {
       // 3. Extract just the "message" value

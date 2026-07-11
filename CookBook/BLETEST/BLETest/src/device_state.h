@@ -4,12 +4,17 @@
 #include <Arduino.h>
 
 enum device_state {
-    CHECK_REGISTRATION, // check for registration AKA looking for existing wifi credentials in NVS and also account details
+    CHECK_WIFI_CREDS, // check for registration AKA looking for existing wifi credentials in NVS and also account details
+    CHECK_REGISTRATION, // check for registration AKA looking user details in aws dynamoDB
+    NEED_WIFI_CREDS, // if no existing wifi credentials, need to grab wifi credentials from user, automatically goes to AP MODE
     NEED_REGISTRATION, // if no existing wifi credentials or account details, need to register device, autoppmatically goes to AP MODE
     WAITING_FOR_REGISTRATION, // grabbing registration details
     SETTING_AP_MODE, // setting and starting ap mode
-    REGRISTRATION_MODE, // currently in AP mode to display web frontend to grab user credentials
-    SETTING_CONFIGURATION, // getting everything like the wifi configs, account details, and personality data 
+    AP_MODE, // currently in AP mode to display web frontend to grab user credentials
+    CONNECTING_TO_WIFI, // connecting to wifi using credentials grabbed from microcontroller NVS storage
+    CONNECTING_TO_AWS, // connect to aws iot service
+    WAITING_FOR_PERSONALITY, // waiting for personality data from AWS IOT CORE
+    SETTING_CONFIGURATION, // getting account details, and personality data from cloud (AWS) service
     SETUP_BLE, // SET UP BLE
     START_BLE, // restart BLE setup to start advertising/scanning
     SCANNING_AND_ADVERTISING, // currently scanning and advertising
