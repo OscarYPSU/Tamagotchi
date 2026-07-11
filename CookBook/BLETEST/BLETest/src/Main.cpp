@@ -1,8 +1,13 @@
 #include "AWS_CONFIGS.h" // contains the device certs and private keys for both devices, as well as the mqtt topics for each device
 #include "BLE.h" // contains the BLE setup and callbacks for device interaction
 #include "device_state.h"
+#include "NVS.h" // contains the NVS setup and functions for saving and reading from non volatile storage
+#include "AP.h"
+#include "Main.h"
 
-// configs for appropiate device using MAC addrress for AWS IOT Core
+const char* state_tag = "state"; // tag for logging the device state
+
+// configs for appropiate device using MAC address for AWS IOT Core
 void setup() {
     Serial.begin(115200); 
     connectWiFi(); // connect to wifi first to get the mac address and then use it to determine which certs and keys to use for AWS IOT CORE connection
@@ -41,6 +46,7 @@ void setup() {
     connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
     // once connected, set up the personality of the device
     set_up_personality(device_mac, CUR_MQTT_PERSONALITY_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_PUB);
+   
 };
 
 const unsigned long MESSAGE_DELAY = 15000; // 15 seconds delay between forwarding messages to AWS, this is to prevent spamming AWS with too many messages in a short period of time which can cause issues with rate limits and also gives some time for the device to process the previous message and response before sending another one
@@ -59,7 +65,6 @@ void loop(){
         Serial.println("Main loop is running, current state: " + String(DEVICE_STATE));
     }
 
-
     // ensure connection stays alive
     if (!MQTT_client.connected()) {
         connectAWS(CUR_DEVICE_CERT, CUR_PRIVATE_KEY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_PERSONALITY_TOPIC_SUB, DEVICE_NAME_AWS);
@@ -73,28 +78,60 @@ void loop(){
         disonnected_from_client = false; // reset the flag after handling the disconnection
     }
 
+
     switch(DEVICE_STATE){
         case CHECK_REGISTRATION:
-            Serial.println("Current state: CHECK_REGISTRATION");
-            check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device is registered in AWS DynamoDB by sending the device mac address as the primary ID, this will trigger a lambda function that checks if the device is registered and if it is, it will send back the personality data for the device to set up the personality of the device which will be used in response generation in AWS Lambda when processing messages from the device
-            DEVICE_STATE = WAITING_FOR_REGISTRATION;
-            Serial.println("Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
-            break;
-        // setting up personality of mcu before setting up BLE
-        case PERSONALITY_SET_UP:
-            if(received_personality_from_aws){
-                Serial.println("Received personality data from AWS, proceeding to set up BLE...");
-                DEVICE_STATE = SETUP_BLE; // move to the next state to start BLE setup
+            ESP_LOGI(state_tag, "Current state: CHECK_REGISTRATION");
+
+            // checks for wifi credentials first (if saved in NVS)
+            WIFI_SSID = read_from_nvs("wifi_credentials", "ssid");
+            WIFI_PASSWORD = read_from_nvs("wifi_credentials", "password");
+
+            // if wifi credentials isnt already in NVS, then set device as AP point to grab the wifi credentials from users
+            if(WIFI_SSID == "None" || WIFI_PASSWORD == "None"){
+                ESP_LOGI(state_tag, "Wifi credentials not found, switching to AP mode");
+                DEVICE_STATE = SETTING_AP_MODE; 
+                break;
             }
+
+            check_for_registration(WiFi.macAddress(), CUR_MQTT_DEVICE_INFO_TOPIC_SUB, CUR_MQTT_DEVICE_INFO_TOPIC_PUB); // check if the device has been registered with the aws, if it is, automatically switches state to PERSONALITY_SET_UP. If not it switches state to NEED_REGISTRATION TO START THE REGISTRATRATION MODE
+            DEVICE_STATE = WAITING_FOR_REGISTRATION;
+            ESP_LOGI(state_tag, "Checking for device registration, switching to state: WAITING_FOR_REGISTRATION");
+            break;
+        
+        // AP mode to grab wifi credentials and account details from user 
+        case SETTING_AP_MODE:
+            ESP_LOGI(state_tag, "Current state: SETTING_AP_MODE");
+            setup_ap_mode(); // sets up the access point and web server to grab the wifi credentials and account details from the user
+            start_ap_mode(); // starts the access point and web server to grab the wifi credentials and account details from the user
+            DEVICE_STATE = REGRISTRATION_MODE; // switch to the registration mode to wait for the user to input the wifi credentials and account details through the web server
+            ESP_LOGI(state_tag, "Switching to state: REGRISTRATION_MODE");
+            break;
+        
+        case REGRISTRATION_MODE:
+            // waiting for the user to input the wifi credentials and account details through the web server
+            // no action here for the device, automatically handled when user gives an in put
+            break;
+
+        // setting up personality of mcu and also  before setting up BLE
+        case SETTING_CONFIGURATION:
+            if(received_personality_from_aws){
+                ESP_LOGI(state_tag, "Received personality data from AWS, proceeding to set up BLE...");
+                DEVICE_STATE = SETUP_BLE; // move to the next state to start BLE setup
+            } else {
+                ESP_LOGI(state_tag, "Waiting for personality data from AWS...");
+            }
+
             break;
         //sets up BLE
         case SETUP_BLE:
-            Serial.println("Current state: SETUP_BLE");
+            ESP_LOGI(state_tag, "Current state: SETUP_BLE");
             setup_advertising_mode();
             setup_scanning_mode();
             Serial.println("Switching to state: SCANNING_AND_ADVERTISING");
             DEVICE_STATE = START_BLE;
             break;
+        //  currently scanning and advertising for device
         case SCANNING_AND_ADVERTISING:
             if(found_device){ // if device is the connector 
                 Serial.println("Found a device to connect to, switching to state: FOUND_DEVICE");
@@ -105,12 +142,16 @@ void loop(){
                 DEVICE_STATE = NEED_AUTHENTICATION;
             }
             break;
+        
+        // starts advertising and scanning
         case START_BLE:
             Serial.println("Current state: START_BLE, starting advertising and scanning...");
             start_advertising();
             start_scanning();
             DEVICE_STATE = SCANNING_AND_ADVERTISING;
             break;
+        
+        // found a target device to connect to
         case FOUND_DEVICE:
             Serial.println("Current state: FOUND_DEVICE, attempting to connect...");
             if (connect_to_server(target_device)) { // attempt to connect to the found device, if connection is successful, the onConnect callback will be triggered and the state will be updated to CONNECTED, if connection fails, we will go back to scanning for devices
@@ -120,6 +161,8 @@ void loop(){
                 DEVICE_STATE = START_BLE;
             }
             break;
+        
+        // need hand shake protocol from the connected device
         case NEED_AUTHENTICATION:
             Serial.println("Current state: NEED_AUTHENTICATION");
             if(allowed_connection){
@@ -137,6 +180,7 @@ void loop(){
                 DEVICE_STATE = ALL_READY;
             }
             break;
+        // current device need to send hand shake protocol to the connected device
         case NEED_TO_AUTHENTICATE:
             Serial.println("Current state: NEED_TO_AUTHENTICATE, performing handshake...");
             if(need_handshake){
@@ -154,8 +198,11 @@ void loop(){
             DEVICE_STATE = ALL_READY; 
             break;
 
+        // ready to receive and send data to the connected device
         case ALL_READY:
             if (have_message_from_connector) {
+
+                // checks for messages periodically and sends the message to aws to process through openai api
                 if (millis() - last_message_time >= MESSAGE_DELAY) {
                     Serial.println("Processing message from connected device and sending to AWS...");
                     send_message_to_aws(message_from_connector, CUR_DEVICE_PERSONALITY, CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB);
@@ -171,14 +218,17 @@ void loop(){
                     }
                 }
             } else {
-                // No pending message — ensure waiting log is cleared
+                // No pending message 
                 waiting_message_logged = false;
             }
             break;
+        
+        // disconnected from the connected device
         case DISCONNECTED:
             Serial.println("Current state: DISCONNECTED");
+            ESP_LOGW(state_tag, "Disconneted from connected device, Current state: DISCONNECTED");
             if(disonnected_from_client){
-                Serial.println("Disconnected from client, restarting BLE setup...");
+                ESP_LOGI(state_tag, "restarting BLE setup...");
                 DEVICE_STATE = START_BLE; // restart the BLE setup to start advertising and scanning again to find and connect to devices again
                 disonnected_from_client = false; // reset the flag after handling the disconnection
             }

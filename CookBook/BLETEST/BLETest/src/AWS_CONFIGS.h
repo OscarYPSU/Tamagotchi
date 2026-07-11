@@ -8,7 +8,8 @@
 
 // WIFI CONFIGS
 #include <WiFi.h>
-extern const char* WIFI_SSID;
+extern String WIFI_SSID;
+extern String WIFI_PASSWORD;
 void connectWiFi();
 
 // AWS IOT configs

@@ -1,11 +1,15 @@
 #include "AWS_CONFIGS.h" // contains the device certs and private keys for both devices, as well as the mqtt topics for each device
 #include "device_state.h"
 
+// tag for logging AWS related issues
+const char* aws_tag = "AWS";
+
+
 // -----------------
 // WIFI CONFIGS
 // -----------------
-const char* WIFI_SSID = "Verizon_yang";
-const char* WIFI_PASSWORD = "9172913763";  // dont need since im using school wifi that doesnt require password
+String WIFI_SSID = "Verizon_yang";
+String WIFI_PASSWORD = "9172913763";  // dont need since im using school wifi that doesnt require password
 
 // AWS IOT configs
 const char* AWS_ENDPOINT = "abuwn28a3fsb9-ats.iot.us-east-2.amazonaws.com";
@@ -178,7 +182,7 @@ PubSubClient MQTT_client(net);
 // connecting to wifi
 void connectWiFi() {
   Serial.print("Connecting to WiFi");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(WIFI_SSID.c_str(), WIFI_PASSWORD.c_str());
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -261,6 +265,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
   } else {
     // if the topic is receiving personality data of device
     if (String(topic) == String(CUR_MQTT_PERSONALITY_TOPIC_SUB)) {
+      
       Serial.print("Received personality data:");
       const char* personality_data = data_from_aws["personality"];
       Serial.println(personality_data);
@@ -286,7 +291,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
       // if response is from topic of getting device info
     } else if(String(topic) == String(CUR_MQTT_DEVICE_INFO_TOPIC_SUB)) {
       // extracts data from AWS, 0 for true, 1 for false for whether the device is registered or not
-      if(DEVICE_STATE == WAITING_FOR_REGISTRATION){ // checks if device is in current state
+      if(DEVICE_STATE == WAITING_FOR_REGISTRATION){ // checks if device is in WAITING FOR REGISTRATION state
         // extracting the status from data
         int registration_status = data_from_aws["registration_status"];
 
@@ -301,7 +306,7 @@ void receive_response_from_AWS(char* topic, byte* payload, unsigned int length) 
         } else { // registered
           // logging
           Serial.println("Device is registered, you can start using the chatbot features");
-          DEVICE_STATE = PERSONALITY_SET_UP; // update the device state to registered}
+          DEVICE_STATE = SETTING_CONFIGURATION; // update the device state to registered}
         }
       }
     }

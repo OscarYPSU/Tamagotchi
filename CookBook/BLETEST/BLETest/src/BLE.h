@@ -1,5 +1,4 @@
-#ifndef BLE_H
-#define BLE_H
+#pragma once
 
 
 #include <Arduino.h>
@@ -82,4 +81,3 @@ void notifiy_for_web_or_mcu();
 void authenticate_as_mcu();
 
 void master_send_data(String& message);
-#endif

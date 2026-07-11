@@ -4,6 +4,9 @@
 #include "BLE.h"
 #include "device_state.h"
 #define SECRET 0x5A // secret for handshake protocl
+#include "esp_log.h"
+
+const char *TAG = "BLE"; // character tag for logging categorization
 
 bool allowed_connection = false; // only true after handshake that allows connected device to start sending data
 uint8_t nonce; // random nonce for authentication
@@ -27,6 +30,7 @@ bool disonnected_from_client = false; // flag to indicate if we have been discon
 // BLE SETUP for advertiser mode
 // -----------
 
+// -sets up the advertising mode by creating the service and characterstics
 
 void setup_advertising_mode(){
     Serial.println("Setting up advertising mode...");
@@ -34,7 +38,7 @@ void setup_advertising_mode(){
     NimBLEServer *p_advertiser = NimBLEDevice::createServer();
     NimBLEService *p_advertiser_service = p_advertiser->createService("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
     
-    // create and attach the data to attatch to advertising data
+    // create and attach the data to attatch to advertising data to identify for our device
     std::string manufacture_data = "";
     manufacture_data += (char)0xFF; // Company ID byte 1
     manufacture_data += (char)0xFF; // Company ID byte 2
@@ -53,7 +57,7 @@ void setup_advertising_mode(){
         NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::NOTIFY
     );
 
-    // Link our Callback class to the characteristic
+    // Link our Callback class to the characteristic (determining what happens when certain action is done w these characterstics)
     p_advertiser->setCallbacks(new advertiser_system_call_backs());
     p_advertiser_characteristic->setCallbacks(new advertiser_interaction_callbacks());
     p_advertiser_auth_characteristic->setCallbacks(new advertiser_authentication_callbacks()); // attach the authenication behavioral code to the characterstics
@@ -61,11 +65,11 @@ void setup_advertising_mode(){
 
     p_advertiser_service->start(); // Finish creating the service
     
-    p_advertise = NimBLEDevice::getAdvertising(); // NimBLE version
+    p_advertise = NimBLEDevice::getAdvertising(); // gets the advertising object
 
     // create and attach the data to attatch to advertising data
-    p_advertise->setManufacturerData(manufacture_data); // NimBLE handles this directly on the advertiser object usually
-    p_advertise->setScanResponse(true); 
+    p_advertise->setManufacturerData(manufacture_data); 
+    p_advertise->setScanResponse(true); // enable scan response which allows the device to respond to scan requests
     p_advertise->addServiceUUID("4fafc201-1fb5-459e-8fcc-c5c9c331914b");
 
     Serial.println("finished setting up advertising...");
@@ -74,36 +78,36 @@ void setup_advertising_mode(){
  
 // to be called if advertising mode is set up but needs to start advertising again
 void start_advertising() {
-    if (p_advertise != nullptr) {
+    if (p_advertise != nullptr) { // check if there is a advertising object
         p_advertise->start();
         Serial.println("Started advertising...");
-    } else {
+    } else { // if not, cant start advertise
         Serial.println("Error: Advertiser not initialized.");
     }
 }
-
 
 bool have_message_from_connector = false; // flag to indicate if we have received a message from the connected device that we want to forward to AWS
 String message_from_connector; // variable to store the message we want to forward to AWS
 
 // determines what happens data is received from connected devices
 void advertiser_interaction_callbacks::onWrite(NimBLECharacteristic *self_characteristic) {
-      if (allowed_connection){
+      if (allowed_connection){ // connected device passed authentication
         std::string value = self_characteristic->getValue();
-        Serial.print("Received value: ");
-        Serial.println(value.c_str());
-        
+        ESP_LOGI("BLE", "Received value: %s", value.c_str());
+
         message_from_connector = String(value.c_str()); // store the message in a global variable so we can forward it to AWS in the main loop, we do this because we cannot call send_message_to_aws directly from this callback function since it needs to read and write to the characteristic and that can only be done after the connection is fully established and the characteristic is properly set up, which happens in the main loop after this callback is called.
         have_message_from_connector = true; // set the flag to indicate we have a message to forward to AWS
 
         // sends message to AWS IOT CORE to then be processed by Lambda and ChatGPT
         // send_message_to_aws(String(value.c_str()), CUR_MQTT_TOPIC_SUB, CUR_MQTT_TOPIC_PUB); we are moving this to main loop to handle for the implemenatio of a delay logic
+      } else {
+        ESP_LOGE("BLE", "Device not authenticated, ignoring write request.");
       }
 };
 
 // Updated signature with ble_gap_conn_desc* desc
 void advertiser_system_call_backs::onConnect(NimBLEServer* self, ble_gap_conn_desc* desc) {
-    Serial.println("Device attempting to connect, setting state as the server/advertiser, sending authentication challenge!");      
+    ESP_LOGI("BLE", "Device attempting to connect, setting state as the server/advertiser, sending authentication challenge!");      
     connected = true; // we are now connected, but not necessarily authenticated yet, we will use this variable to keep track of the connection state and avoid multiple connections at onceq
     current_state = 0; // we are now a server/advertiser, we will use this variable to keep track of the state of the device and avoid multiple connections at once and also to know when to perform certain actions that are specific to being a client vs being a server/advertiser
 
@@ -115,12 +119,11 @@ void advertiser_system_call_backs::onConnect(NimBLEServer* self, ble_gap_conn_de
     nonce = random(1, 255);
     // Write it to the auth characteristic
     p_advertiser_auth_characteristic->setValue(&nonce, 1); // setting the value of the auth char so client can grab it and sent the answer
-    Serial.print("Nonce sent to client: ");
-    Serial.println(nonce);
+    ESP_LOGI(TAG, "Nonce sent to client: %d", nonce);
 };
 
 void advertiser_system_call_backs::onDisconnect(NimBLEServer* self) {
-    Serial.println("Device disconnected... 🔌");
+    ESP_LOGW(TAG, "Device disconnected...");
     connected = false; // reset connection state
     allowed_connection = false;  // reset auth
     found_device = false; // reset found device state so we can find and connect to devices again
